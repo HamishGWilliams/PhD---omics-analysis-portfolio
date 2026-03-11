@@ -91,7 +91,8 @@ pkg_list<-c("tidyverse", #manipulation
             "apeglm", # LFC shrinking method option
             "EnhancedVolcano", # plotting
             "ashr", # LFC shrinking method option
-            "ComplexHeatmap"
+            "ComplexHeatmap",
+            "RColorBrewer"
             ) # plotting
 
 # Execute function:
@@ -101,19 +102,21 @@ check_packages(pkg_list)
 
 We need A couple of different Data files to begin our analyses. These data files include:
 
-1.  Our Count Data
+## 1. Count Data
 
 -   This Data is the raw output data from our featureCounts script from the HPC UNIX system. It is essentially a very large file which contains count data for genes in the *Actinia equina* genome where they are aligned to a high proportion.
 -   We separate this data into their experimental groups, as the analyses needs to be completed separately. I have perhaps performed this separation early, which bulks the code slightly, however I think having a separated working script makes things easier to keep track of.
 
-2.  Our ColData file
+## 2. ColData file
 
 -   This is a=our experimental conditions file. It is a small file which should primarily contain the sample IDs (consistent with the Count Data), and also the categorical variables in which the experiment was completed (*i.e. Control vs Treatment, Experiment 1 vs. Experiment 2*).
 -   Again, separating this file so that we can work on our two experimental data sets separately.
 
 ```{r Import_Data}
 # Import Count Data
-counts <- as.matrix(read.table("./Chapter 1/Data/A_Equina_Counts_redo.tsv", header = T, sep = '\t'))
+getwd()
+  # .rmd file is in .../Chapter 1/Scripts/
+counts <- as.matrix(read.table("../Data/A_Equina_Counts_redo.tsv", header = T, sep = '\t'))
 # Extract Counts only data
 Counts_only <- subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length))
 # Subset counts data into each experiment group:
@@ -121,9 +124,264 @@ counts_exp1 <- subset(counts[,c(1:5,6:12,27:33)])
 counts_exp2<- subset(counts[,c(1:5,13:26)])
 
 # Import colData
-colData <- read.table("data/colData.tsv", header = T, sep = '\t', 
+colData <- read.table("../Data/colData.tsv", header = T, sep = '\t', 
                       stringsAsFactors = TRUE)
 # Subset into Experiment groups:
 colData_exp1 <- subset(colData[c(1:7,22:28),])
 colData_exp2<- subset(colData[8:21,])
+```
+
+# Processing the Raw Data
+
+Before any analyses is performed from our data, we need to process it to an extent so that we can extract useful information from our Count data, as well as performing some diagnostic analyses on our dataset.
+
+We are going to generate several new data frames and vectors in order to do this, which includes:
+
+## 1.  CPM - Counts per Million
+
+-   A normalization method used to scale the raw counts to account for differences in library size or sequencing depth between samples.
+-   Calculated by taking raw counts for each gene, dividing by the total number of counts in the sample. then multiplying by one million.
+
+$$
+    \text{CPM}_{ij} = \left( \frac{\text{Count}_{ij}}{\text{Library size}_j} \right) \times 10^6
+$$
+
+```{r CPM}
+# Apply CPM Formula
+cpm <- {apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+                function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+cpm_exp1 <- {apply(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+cpm_exp2 <- {apply(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+
+# add back row.names information
+counts_rownames <- as.vector(row.names(counts))
+rownames(cpm) <- counts_rownames
+rownames(cpm_exp1) <- counts_rownames
+rownames(cpm_exp2) <- counts_rownames
+
+# Check Values
+colSums(cpm) # = 10^6 for ALL
+colSums(cpm_exp1) # = 10^6 for ALL
+colSums(cpm_exp2) # = 10^6 for ALL
+```
+
+## 2.  Gene Lengths
+
+-   A simple extraction where we obtain the lengths of the genes.
+
+```{r GeneLengths}
+geneLengths <- as.vector(subset(counts, select = c(Length)))
+geneLengths <- as.vector(as.numeric(geneLengths))
+```
+
+## 3.  RPKM - Reads Per Kilobase Million (mapped reads)
+
+-   A normalization method used to normalize gene expression levels based on both the length of the gene and the total number of mapped reads in the sample.
+
+$$
+RPKM_{ij} = \frac{10^9 \times \text{Read count}_{ij}}{\text{Gene length}_i \times \text{Total mapped reads}_j} 
+$$
+
+```{r RPKM}
+rpkm <- apply(X = subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)),
+                 MARGIN = 2, 
+                 FUN = function(x) {
+                   10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+                 })
+rpkm_exp1 <- apply(X = subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)),
+               MARGIN = 2, 
+               FUN = function(x) {
+                 10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+               })
+rpkm_exp2 <- apply(X = subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)),
+               MARGIN = 2, 
+               FUN = function(x) {
+                 10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+               })
+
+# Add back row names
+rownames(rpkm) <- counts_rownames
+rownames(rpkm_exp1) <- counts_rownames
+rownames(rpkm_exp2) <- counts_rownames
+
+# Check values
+colSums(rpkm) # Different values
+colSums(rpkm_exp1) # Different values
+colSums(rpkm_exp2) # Different values
+```
+
+## 4.  RPK - Reads Per Kilobase
+
+-   A non-standard term used in RNA-seq. Mainly used to calculate the TPM after.
+
+$$
+RPK_{ij} = \frac{\text{Read count}_{ij}}{(\frac{\text{Gene length}_i}{1000})}
+$$
+
+```{r RPK}
+rpk <- apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+                 function(x) as.numeric(x)/(geneLengths/1000))
+
+rpk_exp1 <- apply(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/(geneLengths/1000))
+
+rpk_exp2 <- apply(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/(geneLengths/1000))
+
+# Add back row names
+rownames(rpk) <- counts_rownames
+rownames(rpk_exp1) <- counts_rownames
+rownames(rpk_exp2) <- counts_rownames
+```
+
+## 5.  TPM - Transcripts per Million
+
+-   Normalization method designed to provide a measure of gene expression that accounts for both the length of the gene and the total number of transcripts in the sample.\
+-   mainly useful for comparing gene expression levels between samples or conditions
+
+$$
+\text{TPM}_{ij} = \left( \frac{\text{Transcript count}_{ij}}{\text{Gene length}_i} \right) \times \left( \sum_{k=1}^n \frac{\text{Transcript count}_{kj}}{\text{Gene length}_k} \right)^{-1} \times 10^6
+$$
+
+```{r TPM}
+tpm <- apply(rpk, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+tpm_exp1 <- apply(rpk_exp1, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+tpm_exp2 <- apply(rpk_exp2, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+
+# Row names
+rownames(tpm) <- counts_rownames
+rownames(tpm_exp1) <- counts_rownames
+rownames(tpm_exp2) <- counts_rownames
+
+# Check Values
+colSums(tpm) # = 10^6 for ALL
+colSums(tpm_exp1) # = 10^6 for ALL
+colSums(tpm_exp2) # = 10^6 for ALL
+```
+
+## 6.  Variance
+
+-   A simple calculation of the variance of a given dataframe or set of values. - in this instance, we use the TPM values to get an idea of our variance.
+
+$$
+V_i = \text{var}(\text{tpm}_{i1}, \text{tpm}_{i2}, \ldots, \text{tpm}_{in})
+$$
+
+```{r Variance}
+V <- apply(tpm, 1, var)
+V_exp1 <- apply(tpm_exp1, 1, var)
+write.csv(V_exp1, file = "../Results/Intermediary Files/variance_exp1.csv")
+V_exp2 <- apply(tpm_exp2, 1, var)
+write.csv(V_exp2, file = "../Results/Intermediary Files/variance_exp2.csv")
+```
+
+## 7.  Subset data frames for Diagnostics
+
+-   We use the top 100 most variable genes in the genome to run some diagnostic plots to get an idea of how our data is structured and how the raw data is presented.
+-   From this we can determine some initial thoughts about what patterns seems to emerge, identify potential covariance with treatments or variables, and draw PCA plots of our pre-Differential-expression-data.
+
+```{r top_100_genes}
+# Subset the top 100 most variable genes for generating diagnostic plots
+selectedGenes <- names(V[order(V, decreasing = T)][1:100])
+selectedGenes_exp1 <- names(V_exp1[order(V_exp1, decreasing = T)][1:100])
+selectedGenes_exp2 <- names(V_exp2[order(V_exp2, decreasing = T)][1:100])
+```
+
+# Diagnostic Plots
+
+Now that we have the initial data processed and calculated some parameters, we can begin to explore the Count and colData files to identify related-ness and co-linearlity from our samples and treatment groups.
+
+## Heatmap
+
+We can plot a heatmap of our top 100 most variable genes annotated with our **colData**, using this we can start to explore potential patterns in our samples between treatments.
+
+```{r Heatmap}
+# remove redundant columns from colData
+colData_heatmap <- subset(colData[,-c(1,2,4,5,6)])
+colData_heatmap_exp1 <- subset(colData_heatmap[c(1:7,22:28),])
+colData_heatmap_exp2<- subset(colData_heatmap[8:21,])
+# annotation colours
+ann_colours <- list(Group = c("X" = "grey",
+                              "A" = "red",
+                              "B" = "blue",
+                              "C" = "green"),
+                    Clone = c("Clone10" = "pink",
+                              "Clone11" = "red",
+                              "Clone15" = "orange",
+                              "Clone16" = "yellow2",
+                              "Clone2" = "yellow4",
+                              "Clone5" = "lightgreen",
+                              "Clone9" = "green",
+                              "Clone6" = "green4",
+                              "Clone12" = "turquoise",
+                              "Clone14" = "lightblue4",
+                              "Clone20" = "lightblue",
+                              "Clone3" = "blue",
+                              "Clone19" = "violet",
+                              "Clone8" = "purple"))
+
+# plot
+pheatmap(tpm[selectedGenes,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+
+# save
+out_dir <- "../Results/Figures/Heatmaps"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dev.copy(png, file = "../Results/Figures/Heatmaps/heatmap_all_samples.png")
+dev.off()
+
+# heatmap of acute experiment only
+pheatmap(tpm_exp1[selectedGenes_exp1,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap_exp1,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+dev.copy(png, file = "../Results/Figures/Heatmaps/heatmap_acute_only.png")
+dev.off()
+
+# heatmap of primed xperiment
+pheatmap(tpm_exp2[selectedGenes_exp2,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap_exp2,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+
+# Save the Image
+dev.copy(png, file = "../Results/Figures/Heatmaps/heatmap_primed_only.png")
+dev.off()
 ```
