@@ -97,4 +97,33 @@ pkg_list<-c("tidyverse", #manipulation
 # Execute function:
 check_packages(pkg_list)
 ```
+# Import Data
 
+We need A couple of different Data files to begin our analyses. These data files include:
+
+1.  Our Count Data
+
+-   This Data is the raw output data from our featureCounts script from the HPC UNIX system. It is essentially a very large file which contains count data for genes in the *Actinia equina* genome where they are aligned to a high proportion.
+-   We separate this data into their experimental groups, as the analyses needs to be completed separately. I have perhaps performed this separation early, which bulks the code slightly, however I think having a separated working script makes things easier to keep track of.
+
+2.  Our ColData file
+
+-   This is a=our experimental conditions file. It is a small file which should primarily contain the sample IDs (consistent with the Count Data), and also the categorical variables in which the experiment was completed (*i.e. Control vs Treatment, Experiment 1 vs. Experiment 2*).
+-   Again, separating this file so that we can work on our two experimental data sets separately.
+
+```{r Import_Data}
+# Import Count Data
+counts <- as.matrix(read.table("./Chapter 1/Data/A_Equina_Counts_redo.tsv", header = T, sep = '\t'))
+# Extract Counts only data
+Counts_only <- subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length))
+# Subset counts data into each experiment group:
+counts_exp1 <- subset(counts[,c(1:5,6:12,27:33)])
+counts_exp2<- subset(counts[,c(1:5,13:26)])
+
+# Import colData
+colData <- read.table("data/colData.tsv", header = T, sep = '\t', 
+                      stringsAsFactors = TRUE)
+# Subset into Experiment groups:
+colData_exp1 <- subset(colData[c(1:7,22:28),])
+colData_exp2<- subset(colData[8:21,])
+```
