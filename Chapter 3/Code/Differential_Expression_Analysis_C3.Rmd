@@ -272,9 +272,10 @@ sig_interactive_LRT
 ```
 
 ## Final LRT results:
-- Diesel only:      0 
-- Salinity Only:    5439
-- D * S:            10844
+- Diesel only   :    0 
+- Salinity Only :    5439
+- D + S + D*S   :    10844
+- D * S only    :    57
 
 
 ### Combine results
@@ -402,6 +403,14 @@ res_Diesel_at_SalY <- as.data.frame(res_Diesel_at_SalY)
 
 sum(res_Diesel_at_SalY$padj < 0.05, na.rm = T)
 ```
+
+## Wald Final results ----
+diesel only       : 7
+salinity only     : 6412
+D + S + D*S       : 7610
+D*S               : 125
++ D               : 1625
++ S               : 7643
 
 # Merge and Save results
 
