@@ -9,22 +9,12 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+# Purpose of this Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+I think for the 3rd - 4th time I am re-creating a github repository so that I can consolidate and refine my code into a more digestable format so it is easier to work with.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+This specific RMD will process and perform all of the analysis for fo chapter 3's omics side of things. This will not focus on making the plots. 
 
-```{r cars}
-summary(cars)
-```
+Instead, at the end I will have created an image of the environment which should b able to be found in the ../RData directory of this chapters directory which I will load individuall in seperate scripts to make the figures or refine results later in other scripts. 
 
-## Including Plots
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
