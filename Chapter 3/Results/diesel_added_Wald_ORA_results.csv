@@ -1,0 +1,3 @@
+"ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count","GO"
+"GO:0071539","cilium assembly ",0.0066079295154185,0.000519714503499411,3.74180134383737e-06,0.00254068311246558,0.00227265197409912,"evm.utg338.46/evm.utg338.47/evm.utg762.24/evm.utg1846.92/evm.utg4172.3/evm.utg9769.13",6,"biological_processes"
+"GO:0032392","DNA geometric change ",0.0066079295154185,0.000692952671332548,2.5319417520897e-05,0.00859594224834453,0.00768910732081977,"evm.utg594.45/evm.utg594.46/evm.utg2969.2/evm.utg2969.3/evm.utg2969.4/evm.utg11411.7",6,"biological_processes"

@@ -1,0 +1,1394 @@
+---
+title: "Chapter 3 - Enrichment Analyses"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+RMarkdown Script for the enrichment analyses portion of this chapter, allows me to make easier comments on whats going on
+
+# Load Packages
+```{r packages}
+# Load packages ----
+check_packages <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      install.packages(pkg)
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+# Generate a dataframe with a list of packages required
+pkg_list<-c("tidyverse", 
+                            "tibble", 
+                            "stats",
+                            "ggplot2", 
+                            "dplyr", 
+                            "tidyr", 
+                            "ggfortify", 
+                            "knitr",
+                            "clusterProfiler",
+                            #"AnnotationForge",
+                            "enrichplot",
+                            "data.table",
+                            "stats",
+                            "plotly",
+                            "ggVennDiagram",
+                            "VennDiagram",
+                            "limma",
+                            "ggridges",
+                            # "pathview",
+                            "KEGGREST",
+                            "stringr",
+            "forcats",
+            "ComplexHeatmap",
+            "grid",
+            "viridisLite",
+            "RColorBrewer",
+            "circlize")
+
+# Run Function::
+check_packages(pkg_list)
+
+# Generate Functions ----
+convertFractionToNumeric <- function(fraction) {
+  fraction_parts <- strsplit(fraction, "/")[[1]]
+  numerator <- as.numeric(fraction_parts[1])
+  denominator <- as.numeric(fraction_parts[2])
+  numeric_value <- numerator / denominator
+  return(numeric_value)
+}
+```
+
+## Load Data
+```{r data}
+getwd()
+# Load the data
+BP_MF_Terms <- read.table("../Data/Processed/UNIPROT_results.txt", 
+                          header = T, 
+                          sep = '\t', 
+                          stringsAsFactors = FALSE)
+
+# Import the blastp (matching) file
+matching_file <- read.table("../Data/Large_Data_Files/genome_matching_file.txt", 
+                            header = F, 
+                            sep = '\t', 
+                            stringsAsFactors = FALSE)
+
+# Data manipulations
+# Change the name of the columns to be identical
+{
+names(matching_file)[names(matching_file) == "V13"] <- "ID"
+names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+}
+
+# Import DEA results
+DE_results <- read.table("../Results/Multi_Stressor_all_Differential_Expression_Analysis_results.csv",
+                           header = T, 
+                           sep = ',', 
+                           stringsAsFactors = TRUE)
+
+## Perform naming transformation to make gene IDs matching
+DE_results$gene <- gsub("\\.TU", "", DE_results$gene) # Removing "TU" part of names
+DE_results$gene <- gsub("path", "mrna", DE_results$gene) # Replacing "path" -> "mrna"
+```
+
+## Generate DEGs lists and ranked lists
+```{r DEGs_and_Ranked_lists}
+# Diesel_only
+diesel_only_geneList = DE_results[,2]
+names(diesel_only_geneList) = as.character(DE_results[,1])
+diesel_only_geneList = sort(diesel_only_geneList, decreasing = TRUE)
+
+# Salinity only
+salinity_only_geneList = DE_results[,4]
+names(salinity_only_geneList) = as.character(DE_results[,1])
+salinity_only_geneList = sort(salinity_only_geneList, decreasing = TRUE)
+
+# Interactive
+interactive_only_geneList = DE_results[,10]
+names(interactive_only_geneList) = as.character(DE_results[,1])
+interactive_only_geneList = sort(interactive_only_geneList, decreasing = TRUE)
+
+# Diesel Added
+diesel_added_geneList = DE_results[,6]
+names(diesel_added_geneList) = as.character(DE_results[,1])
+diesel_added_geneList = sort(diesel_added_geneList, decreasing = TRUE)
+
+# Salinity added
+salinity_added_geneList = DE_results[,8]
+names(salinity_added_geneList) = as.character(DE_results[,1])
+salinity_added_geneList = sort(salinity_added_geneList, decreasing = TRUE)
+
+# Additive
+combined_geneList = DE_results[,12]
+names(combined_geneList) = as.character(DE_results[,1])
+combined_geneList = sort(combined_geneList, decreasing = TRUE)
+
+# Generate DEGs lists for each contrast ----
+# diesel only
+DEGs <- subset(DE_results[, c("gene", "padj_diesel_only_wald")])
+DEGs <- DEGs[(DEGs$padj_diesel_only_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+diesel_only_Wald_DEGs <- as.vector(DEGs[,1])
+
+# salinity only
+DEGs <- subset(DE_results[, c("gene", "padj_salinity_only_wald")])
+DEGs <- DEGs[(DEGs$padj_salinity_only_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+salinity_only_Wald_DEGs <- as.vector(DEGs[,1])
+
+# Interactive only
+DEGs <- subset(DE_results[, c("gene", "padj_interactive_only_wald")])
+DEGs <- DEGs[(DEGs$padj_interactive_only_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+interactive_only_Wald_DEGs <- as.vector(DEGs[,1])
+
+# Diesel Added
+DEGs <- subset(DE_results[, c("gene", "padj_diesel_added_wald")])
+DEGs <- DEGs[(DEGs$padj_diesel_added_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+diesel_added_Wald_DEGs <- as.vector(DEGs[,1])
+
+# salinity Added
+DEGs <- subset(DE_results[, c("gene", "padj_salinity_added_wald")])
+DEGs <- DEGs[(DEGs$padj_salinity_added_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+salinity_added_Wald_DEGs <- as.vector(DEGs[,1])
+
+# Additive
+DEGs <- subset(DE_results[, c("gene", "padj_combined_wald")])
+DEGs <- DEGs[(DEGs$padj_combined_wald < 0.05),]
+DEGs <- DEGs[complete.cases(DEGs),]
+combined_Wald_DEGs <- as.vector(DEGs[,1])
+```
+
+## Create GO term files
+```{r GO_terms}
+# Merge DEG Files:
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
+
+# Subset Dataframe
+merged_df <- subset(merged_df[, c("V1","ID","GO:BP","GO:MF")])
+
+# Change Variable names
+names(merged_df)[names(merged_df) == "V1"] <- "GENE"
+# Select BP column:
+BP <- merged_df[,c("GENE","ID","GO:BP")]
+BP <- BP[!apply(BP == "", 1, any), ]
+BP <- BP[!duplicated(BP), ]
+# Extract GO terms:
+GENES_BP <- BP
+GENES_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_BP$`GO:BP`)
+GENES_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_BP$`GO:BP`[bracketed_rows])
+GENES_BP <- GENES_BP[, c("GO","GENE")]
+GENES_BP <- GENES_BP[!duplicated(GENES_BP), ]
+GENES_BP <- GENES_BP[complete.cases(GENES_BP),]
+
+## Extract Terms:
+TERMs_BP <- BP
+TERMs_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_BP$`GO:BP`)
+TERMs_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP$`GO:BP`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP <- TERMs_BP[, c("GO","GO:BP")]
+TERMs_BP <- TERMs_BP[!duplicated(TERMs_BP), ]
+names(TERMs_BP)[names(TERMs_BP) == "GO:BP"] <- "GENENAMES_BP"
+TERMs_BP <- TERMs_BP[complete.cases(TERMs_BP),]
+
+# Select MF column:
+MF <- merged_df[,c("GENE","ID","GO:MF")]
+MF <- MF[!apply(MF == "", 1, any), ]
+MF <- MF[!duplicated(MF), ]
+# Extract GO terms:
+GENES_MF <- MF
+GENES_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_MF$`GO:MF`)
+GENES_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_MF$`GO:MF`[bracketed_rows])
+GENES_MF <- GENES_MF[, c("GO","GENE")]
+GENES_MF <- GENES_MF[!duplicated(GENES_MF), ]
+GENES_MF <- GENES_MF[complete.cases(GENES_MF),]
+
+## Extract Terms:
+TERMs_MF <- MF
+TERMs_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_MF$`GO:MF`)
+TERMs_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF$`GO:MF`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF <- TERMs_MF[, c("GO","GO:MF")]
+TERMs_MF <- TERMs_MF[!duplicated(TERMs_MF), ]
+names(TERMs_MF)[names(TERMs_MF) == "GO:MF"] <- "GENENAMES_MF"
+TERMs_MF <- TERMs_MF[complete.cases(TERMs_MF),]
+
+# Tidy-up Environment:
+# Tidy up environment..
+rm(MF,
+   BP,
+   BP_MF_Terms,
+   matching_file,
+   DEGs,
+   merged_df,
+   bracketed_rows
+)
+
+# Save Environment
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/ORA_prep.RData")
+
+```
+
+# Overrepresentation Analysis
+
+```{r ORA}
+  # Load environment for analysis
+  load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/ORA_prep.RData")
+
+## Looping script to perform all ORAs ----
+run_ORA_loop <- function(groups, out_dir = "../Results", assign_to_env = TRUE, env = .GlobalEnv) {
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  res_list <- list()
+  
+  safe_enricher <- function(degs, TERM2GENE, TERM2NAME, label) {
+    tryCatch({
+      set.seed(100)
+      obj <- enricher(degs, TERM2GENE = TERM2GENE, TERM2NAME = TERM2NAME, minGSSize = 1)
+      res <- obj@result
+      if (!is.null(res) && nrow(res) > 0) res$GO <- label
+      res
+    }, error = function(e) {
+      warning(sprintf("ORA failed for '%s': %s", label, conditionMessage(e)))
+      NULL
+    })
+  }
+  safe_convert <- function(x) tryCatch(convertFractionToNumeric(x), error = function(e) NA_real_)
+  
+  for (g in groups) {
+    tryCatch({
+      deg_var <- paste0(g, "_DEGs")
+      if (!exists(deg_var)) {
+        warning(sprintf("Skipping '%s' — object '%s' not found.", g, deg_var))
+        res_list[[g]] <- NULL
+        next
+      }
+      degs <- get(deg_var, inherits = TRUE)
+      
+      bp_res <- safe_enricher(degs, GENES_BP, TERMs_BP, "biological_processes")
+      mf_res <- safe_enricher(degs, GENES_MF, TERMs_MF, "molecular_functions")
+      pieces <- Filter(Negate(is.null), list(bp_res, mf_res))
+      if (length(pieces) == 0) {
+        warning(sprintf("No ORA results produced for '%s'.", g))
+        res_list[[g]] <- NULL
+        next
+      }
+      
+      res <- tryCatch(do.call(rbind, pieces), error = function(e) { warning(sprintf("Combine fail '%s': %s", g, e$message)); NULL })
+      if (is.null(res) || nrow(res) == 0) { res_list[[g]] <- NULL; next }
+      
+      if ("p.adjust" %in% names(res)) res <- res[!is.na(res$p.adjust) & res$p.adjust < 0.05, , drop = FALSE]
+      if (nrow(res) == 0) { warning(sprintf("No significant terms for '%s'.", g)); res_list[[g]] <- res; next }
+      
+      if ("GeneRatio" %in% names(res)) res$GeneRatio <- sapply(res$GeneRatio, safe_convert)
+      if ("BgRatio"   %in% names(res)) res$BgRatio   <- sapply(res$BgRatio,   safe_convert)
+      
+      outfile <- file.path(out_dir, sprintf("%s_ORA_results.csv", g))
+      tryCatch(write.csv(res, outfile, row.names = FALSE),
+               error = function(e) warning(sprintf("Write fail '%s': %s", g, e$message)))
+      
+      res_list[[g]] <- res
+      
+      if (assign_to_env) {
+        obj_name <- sprintf("%s_ORA_results", g)
+        assign(obj_name, res, envir = env)
+      }
+    }, error = function(e) {
+      warning(sprintf("Unexpected error in group '%s': %s", g, conditionMessage(e)))
+      res_list[[g]] <- NULL
+    })
+  }
+  
+  return(res_list)
+}
+groups <- c("diesel_only_Wald",
+            "salinity_only_Wald",
+            "interactive_only_Wald",
+            "diesel_added_Wald",
+            "salinity_added_Wald",
+            "combined_Wald") 
+
+res <- run_ORA_loop(groups, assign_to_env = TRUE)
+```
+
+
+# Gene Set Enrichment Analysis
+```{r GSEA}
+# Make loop
+run_GSEA_loop <- function(groups,
+                          out_dir = "../Results",
+                          p_cutoff = 0.05,
+                          assign_to_env = TRUE,
+                          env = .GlobalEnv) {
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  res_list <- list()
+  
+  # Safe GSEA runner -> returns a list(GSEA_obj = <enrichResult>, df = <data.frame>|NULL)
+  safe_gsea <- function(geneList, TERM2GENE, TERM2NAME) {
+    tryCatch({
+      set.seed(100)
+      g <- GSEA(geneList, TERM2GENE = TERM2GENE, TERM2NAME = TERM2NAME, pvalueCutoff = p_cutoff)
+      df <- g@result
+      list(GSEA_obj = g, df = df)
+    }, error = function(e) {
+      warning(sprintf("GSEA failed: %s", conditionMessage(e)))
+      list(GSEA_obj = NULL, df = NULL)
+    })
+  }
+  
+  for (g in groups) {
+    tryCatch({
+      gl_var <- paste0(g, "_geneList")
+      if (!exists(gl_var)) {
+        warning(sprintf("Skipping '%s' — object '%s' not found.", g, gl_var))
+        res_list[[g]] <- NULL
+        next
+      }
+      geneList <- get(gl_var, inherits = TRUE)
+      
+      # Run BP and MF
+      bp <- safe_gsea(geneList, GENES_BP, TERMs_BP)
+      mf <- safe_gsea(geneList, GENES_MF, TERMs_MF)
+      
+      bp_df <- bp$df
+      if (!is.null(bp_df) && nrow(bp_df) > 0) bp_df$GO <- "biological_processes"
+      mf_df <- mf$df
+      if (!is.null(mf_df) && nrow(mf_df) > 0) mf_df$GO <- "molecular_functions"
+      
+      # Merge results (skip NULLs)
+      pieces <- Filter(function(x) !is.null(x) && nrow(x) > 0, list(bp_df, mf_df))
+      if (length(pieces) == 0) {
+        warning(sprintf("No GSEA results produced for '%s'.", g))
+        res_list[[g]] <- NULL
+        next
+      }
+      merged <- tryCatch({
+        do.call(rbind, pieces)
+      }, error = function(e) {
+        warning(sprintf("Failed to combine GSEA results for '%s': %s", g, conditionMessage(e)))
+        NULL
+      })
+      
+      if (is.null(merged) || nrow(merged) == 0) {
+        warning(sprintf("Empty combined GSEA results for '%s'.", g))
+        res_list[[g]] <- NULL
+        next
+      }
+      
+      # Filter significant results
+      if ("p.adjust" %in% names(merged)) {
+        merged <- merged[!is.na(merged$p.adjust) & merged$p.adjust < p_cutoff, , drop = FALSE]
+      } else {
+        warning(sprintf("'p.adjust' column missing for '%s'; skipping significance filter.", g))
+      }
+      
+      # Package like your example: list(BP, MF, Results)
+      group_list <- list(
+        BP = bp$GSEA_obj,
+        MF = mf$GSEA_obj,
+        Results = merged
+      )
+      
+      # Write CSV
+      outfile <- file.path(out_dir, sprintf("%s_GSEA_results.csv", g))
+      tryCatch({
+        write.csv(group_list$Results, outfile, row.names = FALSE)
+      }, error = function(e) {
+        warning(sprintf("Failed to write CSV for '%s' to '%s': %s", g, outfile, conditionMessage(e)))
+      })
+      
+      res_list[[g]] <- group_list
+      
+      # Optional: assign to environment for easy inspection
+      if (assign_to_env) {
+        assign(sprintf("%s_GSEA", g), group_list, envir = env)
+        assign(sprintf("%s_GSEA_results", g), group_list$Results, envir = env)
+      }
+    }, error = function(e) {
+      warning(sprintf("Unexpected error in group '%s': %s", g, conditionMessage(e)))
+      res_list[[g]] <- NULL
+    })
+  }
+  
+  return(res_list)  # visible return
+}
+
+# Run loop
+groups <- c("diesel_only","salinity_only","interactive_only","diesel_added","salinity_added","combined")
+set.seed(100)
+gsea_out <- run_GSEA_loop(groups, p_cutoff = 0.05, assign_to_env = TRUE)
+
+# Save image
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/ORA_and_GSEA_Wald_completed.RData")
+```
+
+# Combine and Save results files ----
+
+## ORA
+```{r combined_save_ORA}
+# results files names:
+  # diesel_only_Wald_ORA_results
+  # diesel_added_Wald_ORA_results
+  # salinity_only_Wald_ORA_results
+  # salinity_added_Wald_ORA_results
+  # combined_Wald_ORA_results
+  # interactive_only_Wald_ORA_results
+
+# Add contrast column so differentiate between contrasts in the same file:
+diesel_only_Wald_ORA_results$contrast <- "diesel_only"
+diesel_added_Wald_ORA_results$contrast <- "diesel_added"
+salinity_only_Wald_ORA_results$contrast <- "salinity_only"
+salinity_added_Wald_ORA_results$contrast <- "salinity_added"
+combined_Wald_ORA_results$contrast <- "combined"
+interactive_only_Wald_ORA_results$contrast <- "interactive"
+
+# merge
+all_ORA_results <- bind_rows(
+  diesel_only_Wald_ORA_results,
+  diesel_added_Wald_ORA_results,
+  salinity_only_Wald_ORA_results,
+  salinity_added_Wald_ORA_results,
+  combined_Wald_ORA_results,
+  interactive_only_Wald_ORA_results
+)
+
+# Write.csv
+write.csv(all_ORA_results, "../Results/MS_all_ORA_results.csv", row.names = F)
+
+# load QuickGO version of the file
+ORA_results <- read.csv("../Results/MS_all_ORA_results_QuickGO.csv", header = T)
+```
+
+## GSEA
+```{r combined_save_GSEA}
+# Adding contrast column
+# diesel_only_GSEA_results$contrast <- "diesel_only" # No Results
+salinity_only_GSEA_results$contrast <- "salinity_only"
+interactive_only_GSEA_results$contrast <- "interactive"
+diesel_added_GSEA_results$contrast <- "diesel_added"
+salinity_added_GSEA_results$contrast <- "salinity_added"
+combined_GSEA_results$contrast <- "additive"
+
+# Combine
+all_GSEA_results <- bind_rows(#diesel_only_GSEA_results,
+                         salinity_only_GSEA_results,
+                         interactive_only_GSEA_results,
+                         diesel_added_GSEA_results,
+                         salinity_added_GSEA_results,
+                         combined_GSEA_results
+)
+
+# Save
+write.csv(all_GSEA_results, "../Results/MS_all_GSEA_results.csv", row.names = F)
+
+# Load QuickGO version
+GSEA_results <- read.csv("../Results/MS_all_GSEA_results_QuickGO.csv", header = T)
+```
+
+# Plots
+
+## ORA plots
+
+### Attach LFC data to GO data
+```{r ORA_plots}
+# only significant results
+ORA_results <- subset(ORA_results[ORA_results$p.adjust < 0.05,])
+ORA_results <- ORA_results[!apply(is.na(ORA_results), 1, all), ]
+
+# empty df to add data to:
+ORA_plotting_data <- tibble(
+  term = character(),
+  gene = character(),
+  lfc = numeric(),
+  contrast = factor()
+)
+
+# Diesel only
+{
+data_temp <- subset(DE_results[, c("gene", "padj_diesel_only_wald","LFC_diesel_only_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_diesel_only_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+  # ORA columns 
+  ora_df         <- subset(ORA_results[ORA_results$contrast == "diesel_only",]) #                     # Change this to new contrast
+  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+  ora_genes_col  <- "geneID"         # nested gene list in each row
+  
+
+  lfc_map <- data_temp %>%
+    transmute(gene = .data[[gene_col]],
+              lfc  = .data[[lfc_col]]) %>%
+    distinct()
+  
+
+  attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                         split_pattern = "[,;/\\|\\s]+") {
+    out <- df %>%
+      transmute(term  = .data[[term_col]],
+                genes = .data[[genes_col]]) %>%
+      mutate(gene = str_split(genes, split_pattern)) %>%
+      select(-genes) %>%
+      unnest(gene) %>%
+      mutate(gene = str_trim(gene)) %>%
+      filter(!is.na(gene), gene != "") %>%
+      distinct(term, gene) %>%  
+      left_join(lfc_tbl, by = "gene")
+    out
+  }
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "diesel_only")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ora_plotdf, ORA_plotting_data)
+}
+
+# salinity only
+{
+data_temp <- subset(DE_results[, c("gene", "padj_salinity_only_wald","LFC_salinity_only_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_salinity_only_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+  # ORA columns 
+  ora_df         <- subset(ORA_results[ORA_results$contrast == "salinity_only",]) #                     # Change this to new contrast
+  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+  ora_genes_col  <- "geneID"         # nested gene list in each row
+  
+
+  lfc_map <- data_temp %>%
+    transmute(gene = .data[[gene_col]],
+              lfc  = .data[[lfc_col]]) %>%
+    distinct()
+  
+
+  attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                         split_pattern = "[,;/\\|\\s]+") {
+    out <- df %>%
+      transmute(term  = .data[[term_col]],
+                genes = .data[[genes_col]]) %>%
+      mutate(gene = str_split(genes, split_pattern)) %>%
+      select(-genes) %>%
+      unnest(gene) %>%
+      mutate(gene = str_trim(gene)) %>%
+      filter(!is.na(gene), gene != "") %>%
+      distinct(term, gene) %>%  
+      left_join(lfc_tbl, by = "gene")
+    out
+  }
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "salinity_only")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ORA_plotting_data, ora_plotdf)
+}
+
+# Diesel added
+{
+data_temp <- subset(DE_results[, c("gene", "padj_diesel_added_wald","LFC_diesel_added_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_diesel_added_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+  # ORA columns 
+  ora_df         <- subset(ORA_results[ORA_results$contrast == "diesel_added",]) #                     # Change this to new contrast
+  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+  ora_genes_col  <- "geneID"         # nested gene list in each row
+  
+
+  lfc_map <- data_temp %>%
+    transmute(gene = .data[[gene_col]],
+              lfc  = .data[[lfc_col]]) %>%
+    distinct()
+  
+
+  attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                         split_pattern = "[,;/\\|\\s]+") {
+    out <- df %>%
+      transmute(term  = .data[[term_col]],
+                genes = .data[[genes_col]]) %>%
+      mutate(gene = str_split(genes, split_pattern)) %>%
+      select(-genes) %>%
+      unnest(gene) %>%
+      mutate(gene = str_trim(gene)) %>%
+      filter(!is.na(gene), gene != "") %>%
+      distinct(term, gene) %>%  
+      left_join(lfc_tbl, by = "gene")
+    out
+  }
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "diesel_added")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ora_plotdf, ORA_plotting_data)
+}
+
+# salinity added
+{
+data_temp <- subset(DE_results[, c("gene", "padj_salinity_added_wald","LFC_salinity_added_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_salinity_added_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # ORA columns
+ora_df         <- subset(ORA_results[ORA_results$contrast == "salinity_added",])
+ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+ora_genes_col  <- "geneID"         # nested gene list in each row
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "salinity_added")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ORA_plotting_data, ora_plotdf)
+}
+
+# combined
+{
+data_temp <- subset(DE_results[, c("gene", "padj_combined_wald","LFC_combined_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_combined_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # ORA columns
+ora_df         <- subset(ORA_results[ORA_results$contrast == "combined",])
+ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+ora_genes_col  <- "geneID"         # nested gene list in each row
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "combined")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ORA_plotting_data, ora_plotdf)
+}
+
+# interactive
+{
+data_temp <- subset(DE_results[, c("gene", "padj_interactive_only_wald","LFC_interactive_only_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_interactive_only_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # ORA columns
+ora_df         <- subset(ORA_results[ORA_results$contrast == "interactive",])
+ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
+ora_genes_col  <- "geneID"         # nested gene list in each row
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+  
+
+  ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
+
+  ora_terms  <- ora_df  %>% arrange(.data[[ora_padj_col]]) %>% pull(!!ora_term_col)
+  
+  ora_plotdf  <- ora_long  %>% filter(term %in% ora_terms) %>% mutate(contrast = "interactive")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  ora_levels  <- ora_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  ora_plotdf$term  <- factor(ora_plotdf$term,  levels = ora_levels)
+
+  ORA_plotting_data <- bind_rows(ORA_plotting_data, ora_plotdf)
+}
+```
+
+
+### Plot ORA
+
+```{r image_load_ORA}
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_Enrichment_Analyses.RData")
+```
+
+```{r plot_ORA_results}
+# 
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(stringr)
+library(forcats)
+library(scales)
+
+# Options
+plot_df <- ORA_plotting_data %>%
+  group_by(term) %>%
+  summarise(
+    n_contrasts = n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_contrasts), desc(mean_abs_lfc), term) %>%
+  pull(term) -> term_levels
+
+plot_df <- ORA_plotting_data %>%
+  mutate(
+    term = factor(term, levels = rev(term_levels)),
+    contrast = factor(
+      contrast,
+      levels = c(
+        "diesel_only",
+        "diesel_added",
+        "salinity_only",
+        "salinity_added",
+        "combined",
+        "interactive"
+      )
+    )
+  )
+
+# code to modify:
+  p_boxes <- ggplot(plot_df %>% filter(!is.na(lfc)),
+                    aes(x = lfc, 
+                        y = term, 
+                        #fill = contrast, 
+                        #color = contrast
+                        )) +
+    geom_boxplot(outlier.size = 0.6, width = 0.6, 
+                 color = "grey30", 
+                 fill = "grey88"
+                 ) +
+    geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.6, col = "grey") +
+    labs(x = "Shrunken log2 fold-change (LFC)", y = NULL) +
+    facet_grid(
+      cols = vars(contrast),
+      scales = "free",
+      labeller = labeller(
+        contrast = c(
+          diesel_only = "Diesel",
+          diesel_added = "+ Diesel",
+          salinity_only = "Salinity",
+          salinity_added = "+ Salinity",
+          additive = "Additive",
+          interactive = "Interactive"
+        )
+      )
+    ) +
+    #xlim(-25,25) +
+    theme_bw(base_size = 8) +
+    theme(strip.background = element_rect(fill = "white"),
+          axis.text.y = element_text(size = 6))
+
+p_boxes
+
+# Save plot
+ggsave(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/ORA_boxplot.png",
+  p_boxes,
+  width = 246,
+  height = 159,
+  units = "mm",
+  dpi = 300
+)
+```
+
+## GSEA plots
+
+## attach lfc data
+
+```{r GSEA_lfc_data}
+# only significant results
+GSEA_results <- subset(GSEA_results[GSEA_results$p.adjust < 0.05,])
+GSEA_results <- GSEA_results[!apply(is.na(GSEA_results), 1, all), ]
+
+# empty df to add data to:
+GSEA_plotting_data <- tibble(
+  term = character(),
+  gene = character(),
+  lfc = numeric(),
+  contrast = factor()
+)
+
+# No diesel only results, skip...
+
+# salinity only
+{
+data_temp <- subset(DE_results[, c("gene", "padj_salinity_only_wald","LFC_salinity_only_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_salinity_only_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+  # GSEA columns 
+  GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "salinity_only",]) #              
+  GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+  GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
+  GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
+  
+
+  lfc_map <- data_temp %>%
+    transmute(gene = .data[[gene_col]],
+              lfc  = .data[[lfc_col]]) %>%
+    distinct()
+  
+
+  attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                         split_pattern = "[,;/\\|\\s]+") {
+    out <- df %>%
+      transmute(term  = .data[[term_col]],
+                genes = .data[[genes_col]]) %>%
+      mutate(gene = str_split(genes, split_pattern)) %>%
+      select(-genes) %>%
+      unnest(gene) %>%
+      mutate(gene = str_trim(gene)) %>%
+      filter(!is.na(gene), gene != "") %>%
+      distinct(term, gene) %>%  
+      left_join(lfc_tbl, by = "gene")
+    out
+  }
+  
+
+  GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+
+  GSEA_terms  <- GSEA_df  %>% arrange(.data[[GSEA_padj_col]]) %>% pull(!!GSEA_term_col)
+  
+  GSEA_plotdf  <- GSEA_long  %>% filter(term %in% GSEA_terms) %>% mutate(contrast = "salinity_only")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  GSEA_levels  <- GSEA_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  GSEA_plotdf$term  <- factor(GSEA_plotdf$term,  levels = GSEA_levels)
+
+  GSEA_plotting_data <- bind_rows(GSEA_plotting_data, GSEA_plotdf)
+}
+
+# Diesel added
+{
+data_temp <- subset(DE_results[, c("gene", "padj_diesel_added_wald","LFC_diesel_added_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_diesel_added_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+  # GSEA columns 
+  GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "diesel_added",]) #                     # Change this to new contrast
+  GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+  GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
+  GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
+  
+
+  lfc_map <- data_temp %>%
+    transmute(gene = .data[[gene_col]],
+              lfc  = .data[[lfc_col]]) %>%
+    distinct()
+  
+
+  attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                         split_pattern = "[,;/\\|\\s]+") {
+    out <- df %>%
+      transmute(term  = .data[[term_col]],
+                genes = .data[[genes_col]]) %>%
+      mutate(gene = str_split(genes, split_pattern)) %>%
+      select(-genes) %>%
+      unnest(gene) %>%
+      mutate(gene = str_trim(gene)) %>%
+      filter(!is.na(gene), gene != "") %>%
+      distinct(term, gene) %>%  
+      left_join(lfc_tbl, by = "gene")
+    out
+  }
+  
+
+  GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+
+  GSEA_terms  <- GSEA_df  %>% arrange(.data[[GSEA_padj_col]]) %>% pull(!!GSEA_term_col)
+  
+  GSEA_plotdf  <- GSEA_long  %>% filter(term %in% GSEA_terms) %>% mutate(contrast = "diesel_added")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  GSEA_levels  <- GSEA_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  GSEA_plotdf$term  <- factor(GSEA_plotdf$term,  levels = GSEA_levels)
+
+  GSEA_plotting_data <- bind_rows(GSEA_plotdf, GSEA_plotting_data)
+}
+
+# salinity added
+{
+data_temp <- subset(DE_results[, c("gene", "padj_salinity_added_wald","LFC_salinity_added_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_salinity_added_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # GSEA columns
+GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "salinity_added",])
+GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
+GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+  
+
+  GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+
+  GSEA_terms  <- GSEA_df  %>% arrange(.data[[GSEA_padj_col]]) %>% pull(!!GSEA_term_col)
+  
+  GSEA_plotdf  <- GSEA_long  %>% filter(term %in% GSEA_terms) %>% mutate(contrast = "salinity_added")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  GSEA_levels  <- GSEA_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  GSEA_plotdf$term  <- factor(GSEA_plotdf$term,  levels = GSEA_levels)
+
+  GSEA_plotting_data <- bind_rows(GSEA_plotting_data, GSEA_plotdf)
+}
+
+# additive
+{
+data_temp <- subset(DE_results[, c("gene", "padj_combined_wald","LFC_combined_wald")]) # slight mis-match in names: additive = combined
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_combined_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # GSEA columns
+GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "additive",])
+GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
+GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+  
+
+  GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+
+  GSEA_terms  <- GSEA_df  %>% arrange(.data[[GSEA_padj_col]]) %>% pull(!!GSEA_term_col)
+  
+  GSEA_plotdf  <- GSEA_long  %>% filter(term %in% GSEA_terms) %>% mutate(contrast = "additive")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  GSEA_levels  <- GSEA_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  GSEA_plotdf$term  <- factor(GSEA_plotdf$term,  levels = GSEA_levels)
+
+  GSEA_plotting_data <- bind_rows(GSEA_plotting_data, GSEA_plotdf)
+}
+
+# interactive
+{
+data_temp <- subset(DE_results[, c("gene", "padj_interactive_only_wald","LFC_interactive_only_wald")])
+
+  # change these if your column names differ
+  lfc_col        <- "LFC_interactive_only_wald"  # shrunken LFC column in DEA file
+  gene_col       <- "gene"            
+  
+ # GSEA columns
+GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "interactive",])
+GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
+GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
+
+  
+lfc_map <- data_temp %>%
+  transmute(gene = .data[[gene_col]],
+            lfc  = .data[[lfc_col]]) %>%
+  distinct()
+
+
+attach_lfc <- function(df, term_col, genes_col, lfc_tbl,
+                       split_pattern = "[,;/\\|\\s]+") {
+  out <- df %>%
+    transmute(term  = .data[[term_col]],
+              genes = .data[[genes_col]]) %>%
+    mutate(gene = str_split(genes, split_pattern)) %>%
+    select(-genes) %>%
+    unnest(gene) %>%
+    mutate(gene = str_trim(gene)) %>%
+    filter(!is.na(gene), gene != "") %>%
+    distinct(term, gene) %>%                      # drop duplicates within a term
+    left_join(lfc_tbl, by = "gene")
+  out
+}
+
+
+GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+  
+
+  GSEA_long  <- attach_lfc(GSEA_df,  GSEA_term_col,  GSEA_genes_col,  lfc_map)
+
+  GSEA_terms  <- GSEA_df  %>% arrange(.data[[GSEA_padj_col]]) %>% pull(!!GSEA_term_col)
+  
+  GSEA_plotdf  <- GSEA_long  %>% filter(term %in% GSEA_terms) %>% mutate(contrast = "interactive")   # Change contrast name here
+
+  
+  # order terms inside each panel by median LFC (you can change to FDR ordering)
+  GSEA_levels  <- GSEA_plotdf  %>% group_by(term)  %>% summarise(med = median(lfc, na.rm = TRUE))  %>%
+    arrange(med) %>% pull(term)
+
+  
+  GSEA_plotdf$term  <- factor(GSEA_plotdf$term,  levels = GSEA_levels)
+
+  GSEA_plotting_data <- bind_rows(GSEA_plotting_data, GSEA_plotdf)
+}
+```
+
+### Plot GSEA
+
+```{r image_load_ORA}
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_Enrichment_Analyses.RData")
+```
+
+```{r plot_ORA_results}
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(stringr)
+library(forcats)
+library(scales)
+
+plot_df <- GSEA_plotting_data %>%
+  group_by(term) %>%
+  summarise(
+    n_contrasts = n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_contrasts), desc(mean_abs_lfc), term) %>%
+  pull(term) -> term_levels
+
+plot_df <- GSEA_plotting_data %>%
+  mutate(
+    term = factor(term, levels = rev(term_levels)),
+    contrast = factor(
+      contrast,
+      levels = c(
+        "diesel_only",
+        "diesel_added",
+        "salinity_only",
+        "salinity_added",
+        "additive",
+        "interactive"
+      )
+    )
+  )
+
+x_lim <- max(abs(plot_df$lfc), na.rm = TRUE)
+hline_df <- data.frame(y = seq_along(levels(plot_df$term)))
+
+final_GSEA_ridges <- ggplot(plot_df, aes(x = lfc, y = term)) +
+  
+  geom_density_ridges(
+    scale = 0.9,
+    rel_min_height = 0.01,
+    fill = "grey85",
+    colour = "grey20",
+    linewidth = 0.3,
+    position = position_nudge(y = -0.25)
+  ) +
+  
+  geom_vline(
+    xintercept = 0,
+    linetype = 2,
+    linewidth = 0.35,
+    colour = "grey40"
+  ) +
+  
+  # geom_hline(
+  #   data = hline_df,
+  #   aes(yintercept = y),
+  #   inherit.aes = FALSE,
+  #   colour = "grey85",
+  #   linewidth = 0.25
+  # ) +
+  
+  facet_grid(
+    cols = vars(contrast),
+    scales = "free",
+    labeller = labeller(
+      contrast = c(
+        diesel_only = "Diesel",
+        diesel_added = "+ Diesel",
+        salinity_only = "Salinity",
+        salinity_added = "+ Salinity",
+        additive = "Additive",
+        interactive = "Interactive"
+      )
+    )
+  ) +
+  
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width = 120)
+  ) +
+  
+  scale_x_continuous(
+    #limits = c(-x_lim, x_lim),
+    breaks = pretty_breaks(n = 5),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  
+  labs(
+    x = expression(log[2] * " fold-change (LFC, ashr)"),
+    y = NULL
+  ) +
+  
+  theme_bw(base_size = 10) +
+  theme(
+    strip.background = element_rect(fill = "grey95", colour = "black", linewidth = 0.4),
+    strip.text.x = element_text(face = "bold", size = 8),
+    axis.text.y = element_text(size = 5, colour = "black", lineheight = 0.9),
+    axis.text.x = element_text(size = 6.5, colour = "black"),
+    axis.title.x = element_text(size = 8, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(colour = "grey85", linewidth = 0.25),
+    panel.grid.major.x = element_line(colour = "grey88", linewidth = 0.25),
+    panel.spacing.x = unit(0.5, "lines"),
+    plot.margin = margin(5.5, 10, 5.5, 30)
+  )
+
+final_GSEA_ridges
+
+ggsave(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/final_GSEA_ridges.png",
+  final_GSEA_ridges,
+  width = 265,
+  height = 159,
+  units = "mm",
+  dpi = 1200
+)
+```
+
+
+# Clean-up for saving environment
+```{r clean_up}
+rm(BP_MF_Terms,
+   data_temp,
+   DE_results,
+   diesel_added_Wald_ORA_results,
+   diesel_only_Wald_ORA_results,
+   GENES_BP,
+   GENES_MF,
+   GSEA_df,
+   GSEA_plotdf,
+   matching_file,
+   ora_df,
+   ora_long,
+   ora_plotdf,
+   TERMs_BP,
+   TERMs_MF,
+   tpm
+)
+
+save.image("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_Enrichment_Analyses.RData")
+```

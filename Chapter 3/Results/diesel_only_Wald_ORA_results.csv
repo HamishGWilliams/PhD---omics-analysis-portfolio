@@ -1,0 +1,5 @@
+"ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count","GO"
+"GO:0030717","chromosome condensation ",0.333333333333333,3.46476335666274e-05,0.000103942900699927,0.000311828702099781,NA,"evm.utg729.38",1,"biological_processes"
+"GO:0006979","response to oxidative stress ",0.333333333333333,0.00339546808952948,0.0101522063673202,0.0152283095509803,NA,"evm.utg729.38",1,"biological_processes"
+"GO:0007156","homophilic cell adhesion via plasma membrane adhesion molecules ",0.333333333333333,0.00717206014829187,0.021362968896271,0.021362968896271,NA,"evm.utg376.57",1,"biological_processes"
+"GO:0042803","protein homodimerization activity ",0.333333333333333,0.00805306914631673,0.0239658625756256,0.0239658625756256,NA,"evm.utg729.38",1,"molecular_functions"
