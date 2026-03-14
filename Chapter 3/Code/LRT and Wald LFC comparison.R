@@ -307,8 +307,37 @@ salinity_cor_df <- list(
   )
 }
 
+# remove dataframes clogging environment: ----
+rm(counts,
+   countData,
+   colData,
+   colData_keep,
+   dds,
+   dds_diesel_H0,
+   dds_Salinity_H0,
+   res_Diesel_at_SalN,
+   res_Diesel_at_SalN_no_shrink,
+   res_diesel_H0_ashr,
+   res_salinity_H0_ashr,
+   res_Salinity_H0,
+   dds_wald,
+   diesel_lfc_df_raw,
+   diesel_lfc_df_shrunk,
+   diesel_wald_df_raw,
+   diesel_wald_df_shrunk,
+   salinity_lfc_df_raw,
+   salinity_lfc_df_shrunk,
+   salinity_wald_df_raw,
+   salinity_wald_df_shrunk,
+   res_Sal_at_DieselN,
+   res_Diesel_at_SalN_no_shrink
+   )
+
 # Correlation Tests ----
 # Pearson and Spearman correlations
+
+# Load environment back for results:
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/LRT_WALD_Comparison.RData")
 
 ## Diesel shrunk
 cor.test(diesel_cor_df$lfc_LRT_diesel_shrunk, diesel_cor_df$lfc_Wald_diesel_shrunk, method = "pearson")
@@ -368,5 +397,8 @@ all_lfc_plots
 # save plot
 ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/LRT_and_Wald_LRT_correlation.png",  
        all_lfc_plots,
-       width = 16, 
-       height = 12)
+       width = 12, 
+       height = 8)
+
+# save environment
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/LRT_WALD_Comparison.RData")

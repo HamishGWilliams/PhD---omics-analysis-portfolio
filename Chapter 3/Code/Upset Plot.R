@@ -82,11 +82,16 @@ m1 <- make_comb_mat(sets_wald)
 
 # remove the empty (degree 0) intersection; also drop zero-size combos just in case
 m1 <- m1[ comb_degree(m1) > 0 & comb_size(m1) > 0 ]
-
-png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/upset_plot.png", width = 4000, height = 2000, res = 300)
-
 # Load environment image to manipulate plot whenever:
 load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/upset_plot.RData")
+
+
+# Start image save
+png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/upset_plot.png", 
+    width = 3250, 
+    height = 2000, 
+    res = 300)
+
 
 UpSet(m1,
       set_order = c("Diesel",
@@ -102,11 +107,11 @@ UpSet(m1,
       top_annotation = upset_top_annotation(
         m1,
         add_numbers   = TRUE,
-        numbers_gp    = gpar(cex = 0.7, fontface = "bold"),
+        numbers_gp    = gpar(cex = 0.6), # , fontface = "bold"
         numbers_offset= unit(1, "mm"),
         numbers_rot   = 0,
         gp            = gpar(fill = "grey50", col = "grey30"),
-        bar_width     = unit(6, "mm"),
+        bar_width     = unit(5, "mm"),
         ylim          = c(0, max(comb_size(m1))),
         axis_param    = list(
           at      = pretty(c(0, max(comb_size(m1)))),
@@ -215,7 +220,7 @@ intersection_table_with_total <- bind_rows(
     )
 )
 
-# Make custom function to find intersections between specific groups
+# Make custom function to find intersections between specific groups ----
 library(dplyr)
 library(tidyr)
 
@@ -293,13 +298,33 @@ get_specific_intersection <- function(sets_df,
 
 res_inc <- get_specific_intersection(
   sets_df = sets,
-  target_sets = c("LRT: S", "Wald: S"),
-  exact = FALSE
-)
+  target_sets = c("LRT: D*S", "Wald: D*S"),
+  exact = FALSE, # ? only include genes unique to this contrast?
+  return_genes = FALSE # ? Capture gene names too?
+  )
 
 res_inc$n_genes
-res_inc$genes
 
+# multiple intersections at once: ----
+summarise_requested_intersections <- function(sets_df, requests, gene_col = "gene", exact = FALSE) {
+  bind_rows(lapply(requests, function(x) {
+    get_specific_intersection(
+      sets_df = sets_df,
+      target_sets = x,
+      gene_col = gene_col,
+      exact = exact,
+      return_genes = FALSE
+    )
+  }))
+}
+
+requests <- list(
+  c("LRT: D", "Wald: D"),
+  c("LRT: S", "Wald: S"),
+  c("Wald: +D", "Wald: D + S + D*S")
+)
+
+summarise_requested_intersections(sets, requests, exact = FALSE)
 
 
 # save to load later ----
