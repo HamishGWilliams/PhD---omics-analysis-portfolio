@@ -40,26 +40,28 @@ str()
 
 # thresholds
 alpha   <- 0.05      # FDR threshold
-lfc_thr <- NA_real_  # set e.g. 0.58 for ~1.5x threshold on WALD only; keep NA to ignore
 
-# filter data in results to only DEGs
+# filter data in results to only DEGs - Not including LRT results anymore for upset plot
 sets <- data %>%
   transmute(
     gene,
     # LRT values
     `LRT: D`            = !is.na(padj_diesel_only_LRT)   & padj_diesel_only_LRT   < alpha,
-    `LRT: S`          = !is.na(padj_salinity_only_LRT) & padj_salinity_only_LRT < alpha,
+    `LRT: S`            = !is.na(padj_salinity_only_LRT) & padj_salinity_only_LRT < alpha,
     `LRT: D + S + D*S`  = !is.na(padj.x)      & padj.x      < alpha,
-    `LRT: D*S`  = !is.na(padj.y)      & padj.y      < alpha,
+    `LRT: D*S`          = !is.na(padj.y)      & padj.y      < alpha,
     
     # Wald values
-    `Wald: D`           = !is.na(padj_diesel_only_wald)   & padj_diesel_only_wald   < alpha,
-    `Wald: S`         = !is.na(padj_salinity_only_wald) & padj_salinity_only_wald < alpha,
+    `Wald: D`            = !is.na(padj_diesel_only_wald)   & padj_diesel_only_wald   < alpha,
+    `Wald: S`            = !is.na(padj_salinity_only_wald) & padj_salinity_only_wald < alpha,
     `Wald: +D`           = !is.na(padj_diesel_added_wald)   & padj_diesel_added_wald   < alpha,
-    `Wald: +S`         = !is.na(padj_salinity_added_wald) & padj_salinity_added_wald < alpha,
-    `Wald: D + S + D*S` = !is.na(padj_combined_wald)      & padj_combined_wald      < alpha,
-    `Wald: D*S` = !is.na(padj_interactive_only_wald)      & padj_interactive_only_wald      < alpha
+    `Wald: +S`           = !is.na(padj_salinity_added_wald) & padj_salinity_added_wald < alpha,
+    `Wald: D + S + D*S`  = !is.na(padj_combined_wald)      & padj_combined_wald      < alpha,
+    `Wald: D*S`          = !is.na(padj_interactive_only_wald)      & padj_interactive_only_wald      < alpha
   )
+
+# make upset matrix for later
+m2 <- make_comb_mat(sets)
 
 sets_wald <- data %>%
   transmute(
@@ -77,10 +79,14 @@ sets_wald <- data %>%
 # Make upset plot ----
 m1 <- make_comb_mat(sets_wald)
 
+
 # remove the empty (degree 0) intersection; also drop zero-size combos just in case
 m1 <- m1[ comb_degree(m1) > 0 & comb_size(m1) > 0 ]
 
 png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/upset_plot.png", width = 4000, height = 2000, res = 300)
+
+# Load environment image to manipulate plot whenever:
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/upset_plot.RData")
 
 UpSet(m1,
       set_order = c("Diesel",
@@ -132,7 +138,7 @@ UpSet(m1,
 dev.off()
 
 
-# Summary table of DEG directions
+# Summary table of DEG directions ----
 summary_table <- data %>%
   rename(
     padj_full_model_LRT = padj.x,
@@ -177,3 +183,124 @@ summary_table
 # 7 salinity_added_wald       4067            3576          7643
 # 8 salinity_only_LRT         2999            2440          5439
 # 9 salinity_only_wald        3540            2872          6412
+
+# Intersections Table: ----
+library(dplyr)
+library(tibble)
+library(ComplexHeatmap)
+
+comb_codes <- comb_name(m2)
+set_names  <- set_name(m2)
+
+intersection_table <- tibble(
+  comb_code = comb_codes,
+  n_comparisons = comb_degree(m2),
+  n_genes = comb_size(m2),
+  intersection = vapply(comb_codes, function(code) {
+    hits <- set_names[as.logical(as.integer(strsplit(code, "")[[1]]))]
+    paste(hits, collapse = " & ")
+  }, character(1))
+) %>%
+  filter(n_genes > 0) %>%
+  select(intersection, n_comparisons, n_genes) %>%
+  arrange(desc(n_genes), desc(n_comparisons))
+
+intersection_table_with_total <- bind_rows(
+  intersection_table,
+  intersection_table %>%
+    summarise(
+      intersection = "TOTAL",
+      n_comparisons = NA_integer_,
+      n_genes = sum(n_genes)
+    )
+)
+
+# Make custom function to find intersections between specific groups
+library(dplyr)
+library(tidyr)
+
+get_specific_intersection <- function(sets_df,
+                                      target_sets,
+                                      gene_col = "gene",
+                                      exact = FALSE,
+                                      return_genes = TRUE) {
+  
+  # Check inputs
+  missing_sets <- setdiff(target_sets, names(sets_df))
+  if (length(missing_sets) > 0) {
+    stop("These set names were not found in the data: ",
+         paste(missing_sets, collapse = ", "))
+  }
+  
+  comparison_cols <- setdiff(names(sets_df), gene_col)
+  other_sets <- setdiff(comparison_cols, target_sets)
+  
+  # Make sure membership columns are logical and NAs become FALSE
+  dat <- sets_df %>%
+    mutate(
+      across(all_of(comparison_cols), ~ replace_na(as.logical(.x), FALSE))
+    )
+  
+  # Keep genes in all requested sets
+  dat <- dat %>%
+    filter(if_all(all_of(target_sets), ~ .x))
+  
+  # If exact = TRUE, remove genes that are also in any other set
+  if (exact) {
+    dat <- dat %>%
+      filter(if_all(all_of(other_sets), ~ !.x))
+  }
+  
+  # Add a readable label
+  dat <- dat %>%
+    mutate(
+      requested_intersection = paste(target_sets, collapse = " & ")
+    )
+  
+  if (return_genes) {
+    out <- list(
+      intersection = paste(target_sets, collapse = " & "),
+      exact = exact,
+      n_genes = nrow(dat),
+      genes = dat[[gene_col]],
+      data = dat
+    )
+  } else {
+    out <- tibble(
+      intersection = paste(target_sets, collapse = " & "),
+      exact = exact,
+      n_genes = nrow(dat)
+    )
+  }
+  
+  return(out)
+}
+
+# Use function
+  # Names:
+    # # LRT values
+    # `LRT: D`           
+    # `LRT: S`           
+    # `LRT: D + S + D*S` 
+    # `LRT: D*S`         
+    # # Wald values
+    # `Wald: D`          
+    # `Wald: S`          
+    # `Wald: +D`         
+    # `Wald: +S`         
+    # `Wald: D + S + D*S`
+    # `Wald: D*S`        
+
+res_inc <- get_specific_intersection(
+  sets_df = sets,
+  target_sets = c("LRT: S", "Wald: S"),
+  exact = FALSE
+)
+
+res_inc$n_genes
+res_inc$genes
+
+
+
+# save to load later ----
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/upset_plot.RData")
