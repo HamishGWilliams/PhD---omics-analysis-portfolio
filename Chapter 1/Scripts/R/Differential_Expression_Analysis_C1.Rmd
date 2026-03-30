@@ -668,21 +668,23 @@ if (proportion_low_count_genes > 0.2) {
   # Find design of DESeq
 resultsNames(dds)
   # run lfcShrink()
-res_shrunk <- lfcShrink(dds, coef = "Group_X_vs_A", type = "apeglm")
-  # Perform variance stabilizing transformation
-vsd <- vst(dds, blind = FALSE)
+res_shrunk <- lfcShrink(dds, coef = "Group_X_vs_A", type = "ashr")
+# save df of results for later
+res_shrunk_exp1 <- as.data.frame(res_shrunk)
+# rlog for PCA plots
+dds_exp1_rlog <- rlog(dds_exp1)
 }
 
 # PCA plot 
   # PCA plot data:
 {
-exp1_pca_Data <- plotPCA(vsd, 
+exp1_pca_Data <- plotPCA(dds_exp1_rlog, 
                          intgroup = 'Group', 
                          returnData = TRUE) 
-x <- plotPCA(vsd,
+x <- plotPCA(dds_exp1_rlog,
              intgroup = 'Clone',
              returnData = TRUE)
-y <- plotPCA(vsd,
+y <- plotPCA(dds_exp1_rlog,
              intgroup = 'Group',
              returnData = TRUE)
 merged_data_exp1 <- merge(x, y[,c("Group","name")], by = "name")
@@ -755,47 +757,227 @@ df_exp1 <- merge(df_exp1, df_shrunk[, c("gene", "log2FoldChange", "padj")],
                  by = "gene", suffixes = c("_raw", "_shrunk"))
 
 # Highlight Differentially Expressed Genes with Updated Criteria
-df_exp1$diffexpressed <- 'NO'
-df_exp1$diffexpressed[df_exp1$padj_raw < 0.1] <- 'Padj'
-df_exp1$diffexpressed[df_exp1$log2FoldChange_raw > 1 & df_exp1$padj_raw < 0.1 | df_exp1$log2FoldChange_raw < -1 & df_exp1$padj_raw < 0.1] <- 'LFC & Padj'
+df_exp1$diffexpressed <- 'Non-Sig'
 df_exp1$diffexpressed[df_exp1$padj_shrunk < 0.1 & 
-                      (df_exp1$log2FoldChange_shrunk > 1 | df_exp1$log2FoldChange_shrunk < -1)] <- 'SHRUNK'
+                      (df_exp1$log2FoldChange_shrunk >= 0)] <- 'Up'
+df_exp1$diffexpressed[df_exp1$padj_shrunk < 0.1 & 
+                      (df_exp1$log2FoldChange_shrunk <= -0)] <- 'Down'
 
 # Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
-df_exp1$diffexpressed <- factor(df_exp1$diffexpressed, levels = c("NO", "Padj", "LFC & Padj", "SHRUNK"))
-df_exp1$Label <- factor(df_exp1$diffexpressed, levels = c("NO", "Padj", "LFC & Padj", "SHRUNK"))
+df_exp1$diffexpressed <- factor(df_exp1$diffexpressed, levels = c("Non-Sig", "Up", "Down"))
 
 # Plot
-exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(data = df_exp1, 
-       aes(x = log2FoldChange_shrunk, 
-           y = -log10(padj_shrunk))) + 
-  geom_point(size = 3, alpha = 0.75) +
+exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp1,
+  aes(
+    x = log2FoldChange_shrunk,
+    y = -log10(padj_shrunk),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 3, alpha = 0.5) +
   geom_vline(xintercept = 0, col = "black", linetype = "dashed", lwd = 1) + 
   geom_hline(yintercept = -log10(0.1), col = "black", linetype = "dashed", lwd = 1) + 
-  scale_colour_manual(values = c("Acute" = "#e3c519", "Primed" = "#a11dd1")) +
-  scale_x_continuous(
-    limits = c(-10, 10),
-    breaks = seq(-10, 10, by = 2)
-  ) +
+  scale_colour_manual(values = c(
+    "Non-Sig" = "grey70",
+    "Up" = "#ed474a",
+    "Down" = "#5372ed"
+  )) +
+  coord_cartesian(xlim = c(-10, 10)) +
+  scale_x_continuous(breaks = seq(-10, 10, by = 2)) +
   theme_classic(base_size = 24) +
   theme(
     axis.title.y = element_text(face = "bold", margin = margin(0, 30, 0, 0), size = 32, color = "black"),
     axis.title.x = element_text(face = "bold", margin = margin(30, 0, 0, 0), size = 32, color = "black"),
-    axis.text = element_text(size = 24)
+    axis.text = element_text(size = 24),
+    legend.position = "top"
   ) +
   labs(
-    x = expression("log"[2]*" Fold Change"), 
-    y = expression("-log"[10]*" p-adj")
-  ) + 
-  ggtitle(NULL) + theme(legend.position = "top")
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-adj")
+  ) +
+  ggtitle(NULL)
 
 # Save the merged results to find which genes are significant:
 print(exp1_volcano_plot_without_outlier_with_lfcshrink)
 
 
-ggsave("./figures/exp1_volcano_plot_without_outlier_with_lfcshrink.png", exp1_volcano_plot_without_outlier_with_lfcshrink, width = 10, height = 8)
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/exp1_volcano_plot_without_outlier_with_lfcshrink.png", exp1_volcano_plot_without_outlier_with_lfcshrink, width = 10, height = 8)
 # Save DEresults data
-write.csv(as.data.frame(df_exp1), file = "DEA_results_exp1_no_outiler_and_shrunk_values.csv")
+write.csv(as.data.frame(df_exp1), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv")
+```
+
+## Experiment 2
+
+```{r DEA_exp2}
+## Build initial DEseq matrix
+dds_exp2 <- DESeqDataSetFromMatrix(countData = countData_exp2, 
+                                   colData = colData_exp2, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp2 <- dds_exp2[ rowSums(DESeq2::counts(dds_exp2)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp2 <- DESeq(dds_exp2)
+{
+dds <- estimateSizeFactors(dds_exp2)
+normalized_counts <- counts(dds, normalized=TRUE)
+average_counts <- rowMeans(normalized_counts)
+low_count_threshold <- 10
+low_count_genes <- average_counts < low_count_threshold
+proportion_low_count_genes <- sum(low_count_genes) / length(average_counts)
+cat("Proportion of low-count genes:", proportion_low_count_genes, "\n")
+if (proportion_low_count_genes > 0.2) {
+  cat("Consider using lfcShrink() due to a high proportion of low-count genes.\n")
+} else {
+  cat("lfcShrink() may not be necessary based on the proportion of low-count genes.\n")
+}
+}
+
+# Applying LFC Shrink:
+{
+  # Find design of DESeq
+resultsNames(dds)
+design(dds)
+names(dds)
+  # run lfcShrink()
+res_shrunk <- lfcShrink(dds, coef = "Group_C_vs_B", type = "ashr")
+
+# save df of results for later
+res_shrunk_exp2 <- as.data.frame(res_shrunk)
+}
+
+# Differentially Expressed Gene List:
+  # All DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange >= 0 | res_shrunk$log2FoldChange <= 0)), ])
+    # = 12
+  # upregulated DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange >= 0)), ])
+    # = 12
+  # downregulaeted DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange <= 0)), ])
+    # = 0
+
+# PCA plot 
+  # PCA plot data:
+# Transform via rlog
+dds_exp2_rlog <- rlog(dds_exp2)
+
+exp2_pca_Data <- plotPCA(dds_exp2_rlog, 
+                         intgroup = 'Group', 
+                         returnData = TRUE) 
+x <- plotPCA(dds_exp2_rlog,
+             intgroup = 'Clone',
+             returnData = TRUE)
+y <- plotPCA(dds_exp2_rlog,
+             intgroup = 'Group',
+             returnData = TRUE)
+merged_data_exp2 <- merge(x, y[,c("Group","name")], by = "name")
+
+  # Rename Clone variables to just numbers
+merged_data_exp2$Clone <- as.numeric(gsub("Clone", "", merged_data_exp2$Clone))
+merged_data_exp2$group <- as.numeric(gsub("Clone", "", merged_data_exp2$group))
+
+merged_data_exp2$Group <- as.factor(gsub("B", "Unprimed", merged_data_exp2$Group))
+merged_data_exp2$Group <- as.factor(gsub("C", "Primed", merged_data_exp2$Group))
+
+# Add arrow data
+# Split data into group A and X
+data_group_B <- merged_data_exp2 %>% filter(Group == 'Unprimed')
+data_group_C <- merged_data_exp2 %>% filter(Group == 'Primed')
+
+# Join on Clone to get start and end points for arrows
+arrow_data <- inner_join(data_group_B, data_group_C, by = "Clone", suffix = c("_B", "_C"))
+
+# Calculate mid-points
+arrow_data$mid_x <- (arrow_data$PC1_B + arrow_data$PC1_C) / 2
+arrow_data$mid_y <- (arrow_data$PC2_B + arrow_data$PC2_C) / 2
+
+# Draw plot
+
+exp2_pca_plot_with_arrows <- ggplot(data = merged_data_exp2, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group), size = 5) +
+  geom_mark_hull(concavity = 5, expand = 0, radius = 0, aes(fill=Group, colour = Group)) +
+  geom_segment(data = arrow_data, aes(x = PC1_B, 
+                                      y = PC2_B, 
+                                      xend = PC1_C, 
+                                      yend = PC2_C,), 
+               arrow = arrow(type = "closed", 
+                             length = unit(0.20, "inches")), 
+               color = "black") +
+  #geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), 
+  #           size = 3, hjust = 0.5, vjust = 0.5) +
+  scale_color_manual(values = c("Unprimed" = "goldenrod2", "Primed" = "green3")) +
+  scale_fill_manual(values = c("Unprimed" = "goldenrod2", "Primed" = "green3")) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)) +
+  labs(
+    x = paste("PC1: (46% Variance)"),
+    y = paste("PC2: (23% Vaiance)"), 
+    title = "Experiment 2 PCA Result")
 
 
+# Plot the plot
+print(exp2_pca_plot_with_arrows)
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/PCA plots/exp2_PCA_plot_lfcshrink.png", exp2_pca_plot_with_arrows, width = 10, height = 8)
+
+# Volcano plot ----
+# Make dataframe of results
+df_exp2 <- as.data.frame(res_shrunk)
+df_exp2$Expression <- 'NO'
+df_exp2$Expression[df_exp2$log2FoldChange > (0) & df_exp2$padj < 0.1] <- 'UP'
+df_exp2$Expression[df_exp2$log2FoldChange < (0) & df_exp2$padj < 0.1] <- 'DOWN'
+
+# Plot figure
+volcano_exp2 <- ggplot(data = df_exp2,
+       aes(x = log2FoldChange, y = -log10(padj), 
+           col = Expression
+           )) + 
+  geom_point(size = 2, alpha = 0.5) + 
+  # geom_vline(xintercept = c(-1), col = "darkgrey", linetype = "dashed") + 
+  geom_vline(xintercept = c(0), col = "grey1", linetype = "dashed", linewidth= 0.7) + 
+  geom_hline(yintercept = c(1), col = "grey1", linetype = "dashed", linewidth= 0.7) + 
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  #scale_fill_gradient(low = "#2396de", high = "#db183f") +
+  scale_color_manual(values = c("gray","brown1"),
+                     labels = c("Non Significant", "Up Regulated")) + 
+  labs(x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-adjusted"), color = "LFC") + 
+  scale_x_continuous(limits = c(-20,20), breaks = c(-20,-15,-10,-5,0,5,10,15,20)) + 
+  scale_y_continuous(limits = c(0,6), breaks = c(0,1,2,3,4,5,6))
+
+print(volcano_exp2)
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/volcano_exp2.png", volcano_exp2, width = 18, height = 12, units= "cm", dpi = 300)
+```
+
+## Intersection of Results - Venn Diagrams
+
+```{r Venn_Diagram}
+vendDEresults_exp1 <- na.omit(res_shrunk_exp1)
+vendDEresults_exp1$gene <- rownames(vendDEresults_exp1)
+vendDEresults_exp1 <- vendDEresults_exp1[,c("padj","gene")]
+vendDEresults_exp1 <- vendDEresults_exp1[vendDEresults_exp1$padj < 0.1,]
+vendDEresults_exp1 <- na.omit(vendDEresults_exp1)
+
+vendDEresults_exp2 <- na.omit(res_shrunk_exp2)
+vendDEresults_exp2$gene <- rownames(vendDEresults_exp2)
+vendDEresults_exp2 <- vendDEresults_exp2[,c("padj","gene")]
+vendDEresults_exp2 <- vendDEresults_exp2[vendDEresults_exp2$padj < 0.1,]
+vendDEresults_exp2 <- na.omit(vendDEresults_exp2)
+
+List <- list('Experiment 1'=rownames(vendDEresults_exp1),
+             'Experiment 2'=rownames(vendDEresults_exp2))
+
+ggVennDiagram(List) + 
+  scale_fill_distiller(palette = "Reds", direction = 1) + 
+  labs(title = "Intersection of Differentially Expressed Genes")
+
+# All DEGs are unique between experiments, no overlap
 ```
