@@ -1,0 +1,573 @@
+---
+title: "Enrichment_Analysis_C1"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    toc: true
+    toc_depth: 3
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+# Overview
+
+This Markdown script will walk through all of the necessary steps undertaken to complete the **Gene Set Enrichment Analysis** and Over-representation **analysis** for the paired exposure experiment. This follows immediately from the **Differential Expression Analysis** results, and uses them to complete this analysis.
+
+I was finding that even with the previous markdown sheet, that I generated a massive markdown sheet which was not easy to follow, which made it very difficult to understand the flow of the analysis, and at what stage of the process I was in. I have gone away and created a nice flow diagram which will neatly show the general flow of the analysis, and should make it much easier for myself and any other researchers who read this markdown to understand the process, and the steps undertaken to perform this analysis.
+
+However, this is not a general guide to GSEA and Enrichment based analysis. Although I think that these types of content are very lacking in the scientific sphere, this script is not to be used as a single end all be all one step guide to completing this analysis. This markdown will wlakthrough the steps I have taken for my analysis, explaining and justifying parameter settings and additional actions required to complete the analysis. Experiments and analysis as a whole should be tailored to each experiment, and consideration of how best to tune the analyses to that experiment is important for statistical design, and for answering the specific questions of one's own research aims.
+
+# Building Functions
+
+## check_packages_ClusterProfilerR & Loading Packages
+
+Function built to make loading and downloading of packages easier for reproducibility.
+
+```{r check_packages_ClusterProfilerR, message=FALSE, warning=FALSE, results='hide'}
+check_packages_ClusterProfileR <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      install.packages(pkg)
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+# Generate a dataframe with a list of packages required
+
+pkg_list_ClusterProfileR<-c("tidyverse", # manipulations
+                            "tibble", # tables
+                            "stats", # stats
+                            "ggplot2", # plottin
+                            "dplyr", # manipulation
+                            "tidyr", # manipulation
+                            "ggfortify", # plotting
+                            "knitr",# markdown
+                            "clusterProfiler", # enrichment analysis
+                            "enrichplot", # plotting
+                            "data.table", # data formatting
+                            "plotly", # plotting
+                            "ggVennDiagram", # plotting
+                            "VennDiagram", # plotting
+                            "limma", # plotting
+                            "ggridges", # plotting
+                            "stringr") # manipulations
+
+# Run Function::
+check_packages_ClusterProfileR(pkg_list_ClusterProfileR)
+```
+
+## convertFractionToNumeric
+
+Used to convert gene ratios in final analyses to numerical values for generating figures
+
+```{r convertFractionToNumeric, message=FALSE, warning=FALSE}
+convertFractionToNumeric <- function(fraction) {
+  fraction_parts <- strsplit(fraction, "/")[[1]]
+  numerator <- as.numeric(fraction_parts[1])
+  denominator <- as.numeric(fraction_parts[2])
+  numeric_value <- numerator / denominator
+  return(numeric_value)
+}
+```
+
+# Importing and Formatting Data
+
+As outlined by the flow diagram, there are 3 main pieces of data needed to start the analysis. This include **Gene Ontology** data file (UNIPROT_results.txt), which contains the GO data for Biological Processes and Molecular Functions for the blastp matched genes of the UNIPROT database; a **Matching File**, which contains the names of the genes from *A. equina* vs. the Blastp result names - will be used to match the gene names to the blastp results; and finally the **Differential Expression Results**, which includes both the experiments completed (short and long)
+
+```{r Importing_Data, results='hide'}
+# Import BP and MF terms file ----
+BP_MF_Terms <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/UNIPROT_results.txt",
+                          header = T, 
+                          sep = '\t', 
+                          stringsAsFactors = FALSE)
+
+# Import the blastp (matching) file ----
+matching_file <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/genome_matching_file.txt", 
+                            header = F, 
+                            sep = '\t', 
+                            stringsAsFactors = FALSE)
+
+# Change the name of the columns to be identical ----
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+  
+# Merge blastp & GO terms ----
+  # Merge DEG Files:
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
+# Subset Dataframe
+merged_df <- subset(merged_df[, c("V1","ID","GO:BP","GO:MF")])
+# Change Variable names
+names(merged_df)[names(merged_df) == "V1"] <- "GENE"
+
+# Separate BP and MF GOs ----
+# Select BP column:
+BP <- merged_df[,c("GENE","ID","GO:BP")]
+BP <- BP[!apply(BP == "", 1, any), ]
+BP <- BP[!duplicated(BP), ]
+BP <- na.omit(BP)
+# Extract GO terms:
+GENES_BP <- BP
+GENES_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_BP$`GO:BP`)
+GENES_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_BP$`GO:BP`[bracketed_rows])
+GENES_BP <- GENES_BP[, c("GO","GENE")]
+GENES_BP <- GENES_BP[!duplicated(GENES_BP), ]
+GENES_BP <- GENES_BP[complete.cases(GENES_BP),]
+
+## Extract Terms:
+TERMs_BP <- BP
+TERMs_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_BP$`GO:BP`)
+TERMs_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP$`GO:BP`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP <- TERMs_BP[, c("GO","GO:BP")]
+TERMs_BP <- TERMs_BP[!duplicated(TERMs_BP), ]
+names(TERMs_BP)[names(TERMs_BP) == "GO:BP"] <- "GENENAMES_BP"
+TERMs_BP <- TERMs_BP[complete.cases(TERMs_BP),]
+
+# Select MF column:
+MF <- merged_df[,c("GENE","ID","GO:MF")]
+MF <- MF[!apply(MF == "", 1, any), ]
+MF <- MF[!duplicated(MF), ]
+MF <- na.omit(MF)
+# Extract GO terms:
+GENES_MF <- MF
+GENES_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_MF$`GO:MF`)
+GENES_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_MF$`GO:MF`[bracketed_rows])
+GENES_MF <- GENES_MF[, c("GO","GENE")]
+GENES_MF <- GENES_MF[!duplicated(GENES_MF), ]
+GENES_MF <- GENES_MF[complete.cases(GENES_MF),]
+
+## Extract Terms:
+TERMs_MF <- MF
+TERMs_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_MF$`GO:MF`)
+TERMs_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF$`GO:MF`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF <- TERMs_MF[, c("GO","GO:MF")]
+TERMs_MF <- TERMs_MF[!duplicated(TERMs_MF), ]
+names(TERMs_MF)[names(TERMs_MF) == "GO:MF"] <- "GENENAMES_MF"
+TERMs_MF <- TERMs_MF[complete.cases(TERMs_MF),]
+
+# Import DEA results ----
+DE_results_1 <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+DE_results_2 <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+## Perform naming transformation to make gene IDs matching ----
+DE_results_1$X <- gsub("\\.TU", "", DE_results_1$X) # Removing "TU" part of names
+DE_results_1$X <- gsub("path", "mrna", DE_results_1$X) # Replacing "path" -> "mrna"
+DE_results_2$X <- gsub("\\.TU", "", DE_results_2$X) # Removing "TU" part of names
+DE_results_2$X <- gsub("path", "mrna", DE_results_2$X) # Replacing "path" -> "mrna"
+
+# DEGs lists for ORA ----
+DEGs <- DE_results_1[(DE_results_1$padj < 0.1),]
+DEGs <- DEGs[complete.cases(DEGs),]
+DEGs_1 <- as.vector(DEGs[,1])
+length(DEGs_1)
+DEGs <- DE_results_2[(DE_results_2$padj < 0.1),]
+DEGs <- DEGs[complete.cases(DEGs),]
+DEGs_2 <- as.vector(DEGs[,1])
+length(DEGs_2)
+
+# Create geneList objects for GSEA analyses ----
+# Feature 1: numeric vector (LFC)
+geneList_1 = DE_results_1[,3]
+geneList_2 = DE_results_2[,3]
+# Feature 2: Named Vector (rownames)
+names(geneList_1) = as.character(DE_results_1[,1])
+names(geneList_2) = as.character(DE_results_2[,1])
+# feature 3: decreasing order;
+geneList_1 = sort(geneList_1, decreasing = TRUE)
+geneList_2 = sort(geneList_2, decreasing = TRUE)
+```
+
+## Tidy up Environment
+
+```{r Tidy_up, results='hide'}
+# Tidy up environment..
+    rm(MF,
+       BP,
+       BP_MF_Terms,
+       matching_file,
+       DEGs,
+       merged_df,
+       bracketed_rows
+       )
+
+# Save Environment
+save.image(file = "ORA_exp1_prep.RData")
+```
+
+# Overrepresentation Analysis
+
+## Experiment 1
+
+```{r ORA_exp1, results='hide'}
+# Load environment for analysis
+load("ORA_exp1_prep.RData")
+
+# Run ORA
+set.seed(100)
+ORA_exp1_BP <- enricher(DEGs_1, 
+                TERM2GENE = GENES_BP,
+                TERM2NAME = TERMs_BP,
+                minGSSize=1)
+
+set.seed(100)
+ORA_exp1_MF <- enricher(DEGs_1, 
+                TERM2GENE = GENES_MF,
+                TERM2NAME = TERMs_MF,
+                minGSSize=1)
+
+# Extract results and add in GO identifiers
+ORA_exp1_BP_results <- ORA_exp1_BP@result
+ORA_exp1_BP_results$GO <- "biological_processes"
+
+ORA_exp1_MF_results <- ORA_exp1_MF@result
+ORA_exp1_MF_results$GO <- "molecular_functions"
+
+# combine results and subset for significant values
+ORA_exp1_results <- rbind(ORA_exp1_BP_results, ORA_exp1_MF_results)
+rm(ORA_exp1_BP_results, ORA_exp1_MF_results, ORA_exp1_BP, ORA_exp1_MF)
+ORA_exp1_results <- subset(ORA_exp1_results[ORA_exp1_results$p.adjust < 0.1,])
+
+# Change fractions to numeric values
+ORA_exp1_results$GeneRatio <- sapply(ORA_exp1_results$GeneRatio, convertFractionToNumeric)
+ORA_exp1_results$BgRatio <- sapply(ORA_exp1_results$BgRatio, convertFractionToNumeric)
+
+## Export Dataframe results
+write.csv(ORA_exp1_results, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results.csv", row.names = FALSE)
+
+## ... Replace GO descriptions with matched descriptions of GO:ID from QuickGO
+  # import results with QuickGO descriptions
+
+ORA_exp1_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp1_combined_long <- ORA_exp1_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+```
+
+
+## Experiment 2
+```{r ORA_exp2, results='hide'}
+# Load environment for analysis
+#load("ORA_exp1_prep.RData")
+
+# Run ORA
+set.seed(100)
+ORA_exp2_BP <- enricher(DEGs_2, 
+                TERM2GENE = GENES_BP,
+                TERM2NAME = TERMs_BP,
+                minGSSize=1)
+
+set.seed(100)
+ORA_exp2_MF <- enricher(DEGs_2, 
+                TERM2GENE = GENES_MF,
+                TERM2NAME = TERMs_MF,
+                minGSSize=1)
+
+# Extract results and add in GO identifiers
+ORA_exp2_BP_results <- ORA_exp2_BP@result
+ORA_exp2_BP_results$GO <- "biological_processes"
+
+ORA_exp2_MF_results <- ORA_exp2_MF@result
+ORA_exp2_MF_results$GO <- "molecular_functions"
+
+# combine results and subset for significant values
+ORA_exp2_results <- rbind(ORA_exp2_BP_results, ORA_exp2_MF_results)
+rm(ORA_exp2_BP_results, ORA_exp2_MF_results, ORA_exp2_BP, ORA_exp2_MF)
+ORA_exp2_results <- subset(ORA_exp2_results[ORA_exp2_results$p.adjust < 0.1,])
+
+# Change fractions to numeric values
+ORA_exp2_results$GeneRatio <- sapply(ORA_exp2_results$GeneRatio, convertFractionToNumeric)
+ORA_exp2_results$BgRatio <- sapply(ORA_exp2_results$BgRatio, convertFractionToNumeric)
+
+## Export Dataframe results
+write.csv(ORA_exp2_results, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results.csv", row.names = FALSE)
+
+## ... Replace GO descriptions with matched descriptions of GO:ID from QuickGO
+  # import results with QuickGO descriptions
+
+ORA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp2_combined_long <- ORA_exp2_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+```
+
+# Gene Set Enrichment Analysis
+
+## Experiment 1
+```{r GSEA_exp1}
+# Load Environment
+# load("GSEA_exp1.RData")
+
+# Run GSEA
+set.seed(100)
+GSEA_exp1_BP<- GSEA(geneList_1,
+           TERM2GENE = GENES_BP,
+           TERM2NAME = TERMs_BP,
+           pvalueCutoff = 0.1)
+set.seed(100)
+GSEA_exp1_MF<- GSEA(geneList_1,
+           TERM2GENE = GENES_MF,
+           TERM2NAME = TERMs_MF,
+           pvalueCutoff = 0.1)
+
+# Get Results
+GSEA_exp1_BP_results <- GSEA_exp1_BP@result
+GSEA_exp1_BP_results$GO <- "biological_processes"
+
+GSEA_exp1_MF_results <- GSEA_exp1_MF@result
+GSEA_exp1_MF_results$GO <- "molecular_function"
+
+# Merge results
+GSEA_exp1_results <- rbind(GSEA_exp1_BP_results, GSEA_exp1_MF_results)
+
+# Subset for only significant results
+GSEA_exp1_results <- subset(GSEA_exp1_results[GSEA_exp1_results$p.adjust < 0.1,])
+
+# Combine all results into single listed df
+GSEA_exp1 <- list("BP" = GSEA_exp1_BP,
+                  "MF" = GSEA_exp1_MF,
+                  "Results" = GSEA_exp1_results)
+
+# Clean-up 
+rm(GSEA_exp1_MF_results, 
+   GSEA_exp1_BP_results,
+   GSEA_exp1_results,
+   GSEA_exp1_BP,
+   GSEA_exp1_MF)
+
+## Export Dataframe results
+write.csv(GSEA_exp1[["Results"]], "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp1_results.csv", row.names = FALSE)
+
+# Capture QuickGO names... re-import
+  # no results...
+```
+
+## Experiment 2
+```{r GSEA_exp2}
+# Load Environment
+# load("GSEA_exp2.RData")
+
+# Run GSEA
+set.seed(100)
+GSEA_exp2_BP<- GSEA(geneList_2,
+           TERM2GENE = GENES_BP,
+           TERM2NAME = TERMs_BP,
+           pvalueCutoff = 0.1)
+set.seed(100)
+GSEA_exp2_MF<- GSEA(geneList_2,
+           TERM2GENE = GENES_MF,
+           TERM2NAME = TERMs_MF,
+           pvalueCutoff = 0.1)
+
+# Get Results
+GSEA_exp2_BP_results <- GSEA_exp2_BP@result
+GSEA_exp2_BP_results$GO <- "biological_processes"
+
+GSEA_exp2_MF_results <- GSEA_exp2_MF@result
+GSEA_exp2_MF_results$GO <- "molecular_function"
+
+# Merge results
+GSEA_exp2_results <- rbind(GSEA_exp2_BP_results, GSEA_exp2_MF_results)
+
+# Subset for only significant results
+GSEA_exp2_results <- subset(GSEA_exp2_results[GSEA_exp2_results$p.adjust < 0.1,])
+
+# Combine all results into single listed df
+GSEA_exp2 <- list("BP" = GSEA_exp2_BP,
+                  "MF" = GSEA_exp2_MF,
+                  "Results" = GSEA_exp2_results)
+
+# Clean-up 
+rm(GSEA_exp2_MF_results, 
+   GSEA_exp2_BP_results,
+   GSEA_exp2_results,
+   GSEA_exp2_BP,
+   GSEA_exp2_MF)
+
+## Export Dataframe results
+write.csv(GSEA_exp2[["Results"]], "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results.csv", row.names = FALSE)
+
+# Capture QuickGO names... re-import
+GSEA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# nested and long versions
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+GSEA_exp2_results_nested <- GSEA_exp2_results %>%
+  mutate(
+    core_enrichment = as.character(core_enrichment),
+    log2FoldChange = sapply(strsplit(core_enrichment, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+GSEA_exp2_results_long <- GSEA_exp2_results %>%
+  mutate(core_enrichment = as.character(core_enrichment)) %>%
+  separate_rows(core_enrichment, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[core_enrichment])
+```
+
+# Plotting Figures
+
+```{r enrichment_plots}
+p_boxes <- ORA_exp1_combined_long %>%
+  mutate(
+    Description_QuickGO = fct_reorder(
+      Description_QuickGO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description_QuickGO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+
+
+## GSEA plot ----
+p_boxes <- GSEA_exp2_results_long %>%
+  mutate(
+    Description_QuickGO = fct_reorder(
+      Description_QuickGO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description_QuickGO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+
+```

@@ -1,0 +1,5 @@
+﻿ID,Description,Description_QuickGO,GeneRatio,BgRatio,pvalue,p.adjust,qvalue,geneID,Count,GO
+GO:0009755,hormone-mediated signaling pathway ,hormone-mediated signaling pathway,0.5,0.001455201,0.002908334,0.005816668,NA,evm.utg3013.18,1,biological_processes
+GO:0000209,protein polyubiquitination ,protein polyubiquitination,0.5,0.005335736,0.010643185,0.010643185,NA,evm.utg92.58,1,biological_processes
+GO:0016500,G protein-coupled receptor activity ,protein-hormone receptor activity,0.2,0.000782133,0.003904776,0.007809553,NA,evm.utg3013.18,1,molecular_functions
+GO:0030414,peptidase inhibitor activity ,peptidase inhibitor activity,0.2,0.003070595,0.015259856,0.015259856,NA,evm.utg3872.21,1,molecular_functions

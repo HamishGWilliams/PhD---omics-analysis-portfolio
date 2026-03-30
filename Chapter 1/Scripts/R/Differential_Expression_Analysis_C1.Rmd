@@ -710,7 +710,7 @@ arrow_data$mid_x <- (arrow_data$PC1_X + arrow_data$PC1_A) / 2
 arrow_data$mid_y <- (arrow_data$PC2_X + arrow_data$PC2_A) / 2
 
   # plot basic PCA to capture PC variance %-ges
-plotPCA(vsd, intgroup = "Group") + 
+plotPCA(dds_exp1_rlog, intgroup = "Group") + 
   ggtitle("PCA of RNA-seq Data") + 
   theme_minimal()
 }
@@ -804,7 +804,7 @@ print(exp1_volcano_plot_without_outlier_with_lfcshrink)
 
 ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/exp1_volcano_plot_without_outlier_with_lfcshrink.png", exp1_volcano_plot_without_outlier_with_lfcshrink, width = 10, height = 8)
 # Save DEresults data
-write.csv(as.data.frame(df_exp1), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv")
+write.csv(as.data.frame(res_shrunk_exp1), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv")
 ```
 
 ## Experiment 2
@@ -954,7 +954,12 @@ volcano_exp2 <- ggplot(data = df_exp2,
 
 print(volcano_exp2)
 
+# Save plot
 ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/volcano_exp2.png", volcano_exp2, width = 18, height = 12, units= "cm", dpi = 300)
+
+# Save results
+# Save DEresults data
+write.csv(as.data.frame(res_shrunk_exp2), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv")
 ```
 
 ## Intersection of Results - Venn Diagrams

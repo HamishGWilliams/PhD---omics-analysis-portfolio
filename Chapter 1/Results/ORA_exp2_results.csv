@@ -1,0 +1,5 @@
+"ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count","GO"
+"GO:0009755","hormone-mediated signaling pathway ",0.5,0.00145520060979835,0.00290833395841383,0.00581666791682767,NA,"evm.utg3013.18",1,"biological_processes"
+"GO:0000209","protein polyubiquitination ",0.5,0.00533573556926062,0.0106431849550176,0.0106431849550176,NA,"evm.utg92.58",1,"biological_processes"
+"GO:0016500","G protein-coupled receptor activity ",0.2,0.000782132614930043,0.00390477642187315,0.00780955284374629,NA,"evm.utg3013.18",1,"molecular_functions"
+"GO:0030414","peptidase inhibitor activity ",0.2,0.00307059471046609,0.0152598557892967,0.0152598557892967,NA,"evm.utg3872.21",1,"molecular_functions"
