@@ -47,3 +47,8 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# OrgDB files - too large to store
+*.sqlite
+*.db/
+.db
