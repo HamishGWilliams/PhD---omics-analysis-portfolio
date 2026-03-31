@@ -349,6 +349,50 @@ ORA_exp2_combined_long <- ORA_exp2_results %>%
   mutate(log2FoldChange = lfc_map[geneID])
 ```
 
+### combine ORA results files
+
+Combining the results to be able to create a single supplementary figure for the chapter
+
+```{r ORA_supplementary_table_data}
+# Need to round the LFC values and other numeric values before nesting
+# exp1
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(round(lfc_map[genes], 4), collapse = "/")
+    })
+  )
+
+# exp2
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(round(lfc_map[genes], 4), collapse = "/")
+    })
+  )
+
+ORA_exp1_combined_nested$Experiment <- "Acute"
+ORA_exp2_combined_nested$Experiment <- "Primed"
+
+ORA_results_nested_combined <- rbind(ORA_exp1_combined_nested,
+                                     ORA_exp2_combined_nested)
+
+# Refine DF
+ORA_results_nested_combined_refined <- ORA_results_nested_combined %>%
+  dplyr::select(Experiment, ID, Description_QuickGO, GeneRatio, BgRatio, p.adjust, qvalue, geneID, log2FoldChange) %>%
+  arrange(Experiment, p.adjust)
+
+# round all other numeric columns
+ORA_results_nested_combined_refined <- ORA_results_nested_combined_refined %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4)))
+
+write.csv(ORA_results_nested_combined_refined, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_results_nested_combined.csv", row.names = FALSE)
+```
+
 # Gene Set Enrichment Analysis
 
 ## Experiment 1
