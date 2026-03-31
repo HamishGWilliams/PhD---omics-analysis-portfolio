@@ -957,8 +957,15 @@ DE_results_2_with_protein_names <- DE_results_2_with_protein_names %>%
   arrange(padj, desc(abs(log2FoldChange)))
 
 # combined into 1 df
+DE_results_1_with_protein_names$Experiment <- "Acute"
+DE_results_2_with_protein_names$Experiment <- "Primed"
+
 DE_results_with_protein_names <- rbind(DE_results_1_with_protein_names, 
                                        DE_results_2_with_protein_names)
+
+DE_results_with_protein_names <- DE_results_with_protein_names %>%
+  dplyr::select(Experiment, geneID, proteinID, baseMean, log2FoldChange, lfcSE, pvalue, padj) %>%
+  arrange(Experiment, padj)
 
 # save files for supplementary materials:
 write.csv(DE_results_with_protein_names, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DE_results_with_protein_namess.csv", row.names = FALSE)
