@@ -52,4 +52,4 @@ rsconnect/
 *.sqlite
 *.db/
 .db
-/org.Aequina.eg.db/
+org.Aequina.eg.db/
