@@ -986,3 +986,199 @@ ggVennDiagram(List) +
 
 # All DEGs are unique between experiments, no overlap
 ```
+
+
+# Marius' Comments
+
+adding a small section here to work on the points from Marius' comments on the 6th iteration draft of chapter 1
+
+- Make the volcano plots using raw p-values, highlighting p-adj significant points
+- Make a 2x2 plot with the new volcanos and the PCA plots to make a single figure
+
+- correlate the raw and shrunk lfc values between experiments
+
+## New volcano plots
+
+```{r new_volcanos}
+# experiment 1 ----
+# Import results
+df_exp1 <- read.csv("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEresults_exp1_outlier.csv", sep = ",", header = TRUE)
+
+# Merge the shrunken results into df_exp1
+df_exp1$gene <- df_exp1$X  # Ensure the gene identifiers are in a column
+dds <- estimateSizeFactors(dds_exp1)
+res_shrunk <- lfcShrink(dds, coef = "Group_X_vs_A", type = "ashr")
+df_shrunk <- as.data.frame(res_shrunk)  # Convert the shrunken results to a dataframe
+df_shrunk$gene <- rownames(df_shrunk)  # Ensure gene identifiers are in a column
+
+# Merge the two dataframes based on the gene identifiers
+df_exp1 <- merge(df_exp1, df_shrunk[, c("gene", "log2FoldChange", "padj")], 
+                 by = "gene", suffixes = c("_raw", "_shrunk"))
+
+# Highlight Differentially Expressed Genes with Updated Criteria
+df_exp1$diffexpressed <- 'P-adj > 0.1'
+df_exp1$diffexpressed[df_exp1$padj_shrunk <= 0.1] <- 'P-adj <= 0.1'
+
+# Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
+df_exp1$diffexpressed <- factor(df_exp1$diffexpressed, levels = c("P-adj > 0.1", "P-adj <= 0.1"))
+
+# Plot
+exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp1,
+  aes(
+    x = log2FoldChange_shrunk,
+    y = -log10(pvalue),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 3, alpha = 0.8) +
+  geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
+  scale_colour_manual(values = c(
+    "P-adj > 0.1" = "grey70",
+    "P-adj <= 0.1" = "black"
+  )) +
+  coord_cartesian(xlim = c(-6, 6)) +
+  scale_x_continuous(breaks = seq(-6, 6, by = 1)) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-value")
+  ) +
+  ggtitle(NULL)
+
+# Save the merged results to find which genes are significant:
+print(exp1_volcano_plot_without_outlier_with_lfcshrink)
+
+
+
+
+# experiment 2 ----
+dds_exp2 <- DESeqDataSetFromMatrix(countData = countData_exp2, 
+                                   colData = colData_exp2, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp2 <- dds_exp2[ rowSums(DESeq2::counts(dds_exp2)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp2 <- DESeq(dds_exp2)
+dds <- estimateSizeFactors(dds_exp2)
+# lfc shrinking
+res_shrunk <- lfcShrink(dds, coef = "Group_C_vs_B", type = "ashr")
+
+# build volcano
+df_exp2 <- as.data.frame(res_shrunk)
+# Highlight Differentially Expressed Genes with Updated Criteria
+df_exp2$diffexpressed <- 'P-adj > 0.1'
+df_exp2$diffexpressed[df_exp2$padj <= 0.1] <- 'P-adj <= 0.1'
+# Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
+df_exp2$diffexpressed <- factor(df_exp2$diffexpressed, levels = c("P-adj > 0.1", "P-adj <= 0.1"))
+
+# Plot figure
+exp2_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp2,
+  aes(
+    x = log2FoldChange,
+    y = -log10(pvalue),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 3, alpha = 0.8) +
+  geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
+  scale_colour_manual(values = c(
+    "P-adj > 0.1" = "grey70",
+    "P-adj <= 0.1" = "black"
+  )) +
+  coord_cartesian(xlim = c(0, 20)) +
+  scale_x_continuous(breaks = seq(0, 20, by = 5)) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-value")
+  ) +
+  ggtitle(NULL)
+
+print(exp2_volcano_plot_without_outlier_with_lfcshrink)
+```
+
+
+## Correlate acute and primed (shrunk and unshrunk) LFC values
+
+```{r correlate_experiments_lfcs}
+# We will need results with both non-shrunk and shrunk lfc values
+# therefore we need to repeat the DEA analysis and save objects with the raw and shrunk lfc values
+
+
+# Set-up ----
+# Import Count Data
+  # .rmd file is in .../Chapter 1/Scripts/
+counts <- as.matrix(read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/A_Equina_Counts_redo.tsv", header = T, sep = '\t'))
+counts_exp1 <- subset(counts[,c(1:5,6:12,27:33)])
+counts_exp2<- subset(counts[,c(1:5,13:26)])
+# Remove the 'width' column
+countData_exp1 <- as.matrix(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)))
+countData_exp2 <- as.matrix(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)))
+# Remove outliers in Count Data
+countData_exp1 <- as.matrix(subset(countData_exp1[,c(1:5, 7:9, 11:14)]))
+
+# Here we tell R to make sure that it reads our data as numeric, as I had issues with this previously
+{apply(countData_exp1, 2, as.numeric)
+  sapply(countData_exp1, as.numeric)
+  class(countData_exp1) <- "numeric"
+  storage.mode(countData_exp1) <- "numeric"}
+
+{apply(countData_exp2, 2, as.numeric)
+  sapply(countData_exp2, as.numeric)
+  class(countData_exp2) <- "numeric"
+  storage.mode(countData_exp2) <- "numeric"}
+
+# Import colData
+colData <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/colData.tsv", header = T, sep = '\t', 
+                      stringsAsFactors = TRUE)
+# Subset into Experiment groups:
+# Remove outliers in colData Data 1
+colData_exp1 <- subset(colData[c(1:7,22:28),])
+colData_exp1 <- subset(colData_exp1[c(1:5, 7:9, 11:14),])
+colData_exp2<- subset(colData[8:21,])
+
+# design formula
+designFormula <- "~ Clone + Group"
+
+# Experiment 1 ----
+## Build initial DEseq matrix
+dds_exp1 <- DESeqDataSetFromMatrix(countData = countData_exp1, 
+                                   colData = colData_exp1, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp1 <- dds_exp1[ rowSums(DESeq2::counts(dds_exp1)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp1 <- DESeq(dds_exp1)
+
+# No Shrinking applied
+DEresults_exp1_no_shrinking <- as.data.frame(results(dds_exp1, contrast = c("Group", 'X', 'A')))
+
+# sidetrack .... make volcano using raw p values, with p-adj highlighted
+
+
+
+# Apply Shrinkging
+dds <- estimateSizeFactors(dds_exp1)
+DEresults_exp1_with_shrinking <- as.data.frame(lfcShrink(dds, coef = "Group_X_vs_A", type = "ashr"))
+# rename lfc column to reflect shrinking
+names(DEresults_exp1_with_shrinking)[names(DEresults_exp1_with_shrinking) == "log2FoldChange"] <- "log2FoldChange_Shrunk"
+
+# Merge dfs
+merged_DE_results_exp1 <- merge(DEresults_exp1_no_shrinking,
+                                DEresults_exp1_with_shrinking,
+                                by = 0)
+
+
+```
