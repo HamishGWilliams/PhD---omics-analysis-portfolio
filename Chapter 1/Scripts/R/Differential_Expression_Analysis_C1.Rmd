@@ -725,7 +725,7 @@ exp1_pca_plot_with_arrows <- ggplot(data = merged_data_exp1, aes(x = PC1, y = PC
                                       xend = PC1_A, 
                                       yend = PC2_A,), 
                arrow = arrow(type = "closed", 
-                             length = unit(0.20, "inches")), 
+                             length = unit(0.10, "inches")), 
                color = "black") +
   # geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), size = 3, hjust = 0.5, vjust = 0.5) +
   scale_color_manual(values = c("Exposed" = "red", "Unexposed" = "blue")) +
@@ -902,7 +902,7 @@ exp2_pca_plot_with_arrows <- ggplot(data = merged_data_exp2, aes(x = PC1, y = PC
                                       xend = PC1_C, 
                                       yend = PC2_C,), 
                arrow = arrow(type = "closed", 
-                             length = unit(0.20, "inches")), 
+                             length = unit(0.10, "inches")), 
                color = "black") +
   #geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), 
   #           size = 3, hjust = 0.5, vjust = 0.5) +
@@ -1031,14 +1031,15 @@ exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
     colour = diffexpressed
   )
 ) + 
-  geom_point(size = 3, alpha = 0.8) +
+  geom_point(size = 1.5, alpha = 0.8) +
   geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
   scale_colour_manual(values = c(
-    "P-adj > 0.1" = "grey70",
+    "P-adj > 0.1" = "grey80",
     "P-adj <= 0.1" = "black"
   )) +
-  coord_cartesian(xlim = c(-6, 6)) +
-  scale_x_continuous(breaks = seq(-6, 6, by = 1)) +
+  coord_cartesian(xlim = c(-6, 6), ylim = c(0,20)) +
+  scale_x_continuous(breaks = seq(-6, 6, by = 2)) +
+    scale_y_continuous(breaks = seq(0, 20, by = 5)) +
   theme_classic() +
   theme(
     axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
@@ -1086,14 +1087,15 @@ exp2_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
     colour = diffexpressed
   )
 ) + 
-  geom_point(size = 3, alpha = 0.8) +
+  geom_point(size = 1.5, alpha = 0.8) +
   geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
   scale_colour_manual(values = c(
-    "P-adj > 0.1" = "grey70",
+    "P-adj > 0.1" = "grey80",
     "P-adj <= 0.1" = "black"
   )) +
-  coord_cartesian(xlim = c(0, 20)) +
-  scale_x_continuous(breaks = seq(0, 20, by = 5)) +
+  coord_cartesian(xlim = c(-20, 20), ylim = c(0,20)) +
+  scale_x_continuous(breaks = seq(-20, 20, by = 5)) +
+  scale_y_continuous(breaks = seq(0, 20, by = 5)) + 
   theme_classic() +
   theme(
     axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
@@ -1107,6 +1109,33 @@ exp2_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
   ggtitle(NULL)
 
 print(exp2_volcano_plot_without_outlier_with_lfcshrink)
+
+# plot side-by-side
+library(gridExtra)
+library(grid)
+library(patchwork)
+
+plot <- (exp1_volcano_plot_without_outlier_with_lfcshrink | exp2_volcano_plot_without_outlier_with_lfcshrink)
+
+plot2 <- ((exp1_pca_plot_with_arrows +  labs(title = "")) +
+  theme(plot.title = element_text(size = 12),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10)) | (exp2_pca_plot_with_arrows + labs(title = "") +
+  theme(plot.title = element_text(size = 12),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10))))
+
+volcano_and_pca_plots <- (plot / plot2) 
+
+png(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/volcano_and_pca_plots.png",
+  width = 10,
+  height = 7,
+  units = "in",
+  res = 900
+)
+volcano_and_pca_plots
+dev.off()
 ```
 
 
