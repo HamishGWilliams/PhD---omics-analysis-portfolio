@@ -419,28 +419,7 @@ GSEA_exp1_BP_results$GO <- "biological_processes"
 GSEA_exp1_MF_results <- GSEA_exp1_MF@result
 GSEA_exp1_MF_results$GO <- "molecular_function"
 
-# Merge results
-GSEA_exp1_results <- rbind(GSEA_exp1_BP_results, GSEA_exp1_MF_results)
 
-# Subset for only significant results
-GSEA_exp1_results <- subset(GSEA_exp1_results[GSEA_exp1_results$p.adjust < 0.1,])
-
-# Combine all results into single listed df
-GSEA_exp1 <- list("BP" = GSEA_exp1_BP,
-                  "MF" = GSEA_exp1_MF,
-                  "Results" = GSEA_exp1_results)
-
-# Clean-up 
-rm(GSEA_exp1_MF_results, 
-   GSEA_exp1_BP_results,
-   GSEA_exp1_results,
-   GSEA_exp1_BP,
-   GSEA_exp1_MF)
-
-## Export Dataframe results
-write.csv(GSEA_exp1[["Results"]], "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp1_results.csv", row.names = FALSE)
-
-# Capture QuickGO names... re-import
   # no results...
 ```
 
@@ -517,6 +496,8 @@ GSEA_exp2_results_long <- GSEA_exp2_results %>%
 # Plotting Figures
 
 ```{r enrichment_plots}
+# ORA plots ----
+  # Exp1
 p_boxes <- ORA_exp1_combined_long %>%
   mutate(
     Description_QuickGO = fct_reorder(
@@ -565,6 +546,54 @@ p_boxes <- ORA_exp1_combined_long %>%
             )
 p_boxes
 
+# Exp2
+p_boxes <- ORA_exp2_combined_long %>%
+  mutate(
+    Description_QuickGO = fct_reorder(
+      Description_QuickGO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description_QuickGO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
 
 ## GSEA plot ----
 p_boxes <- GSEA_exp2_results_long %>%
@@ -614,7 +643,6 @@ p_boxes <- GSEA_exp2_results_long %>%
              )
             )
 p_boxes
-
 ```
 
 # Semantic Clustering
@@ -780,8 +808,10 @@ bp_fit <- evaluate_k(sim_bp, k_range = 2:40) # max index
 mf_fit <- evaluate_k(sim_mf, k_range = 2:33) # max index
 
 best_k_bp <- bp_fit$best_k
+best_k_bp
   # 29
 best_k_mf <- mf_fit$best_k
+best_k_mf
   # 14
 
 # Optional: inspect k selection
@@ -935,18 +965,92 @@ p_boxes
 # Semantically clustering all enrichment analysis results together 
 
 ```{r enrichment_results_str}
-# look at structures of all results files
-str(ORA_exp1_combined_nested)
-str(ORA_exp2_combined_nested)
-str(GSEA_exp2_results_nested)
+# repeat nesting of results to ensure you are using the right data:
+{
+# ora exp1
+ORA_exp1_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
 
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp1_combined_long <- ORA_exp1_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+
+# ora exp2
+ORA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+rm(lfc_map)
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp2_combined_long <- ORA_exp2_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+
+# gsea exp2
+GSEA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# nested and long versions
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+GSEA_exp2_results_nested <- GSEA_exp2_results %>%
+  mutate(
+    core_enrichment = as.character(core_enrichment),
+    log2FoldChange = sapply(strsplit(core_enrichment, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+GSEA_exp2_results_long <- GSEA_exp2_results %>%
+  mutate(core_enrichment = as.character(core_enrichment)) %>%
+  separate_rows(core_enrichment, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[core_enrichment])
+}
+
+# check packages loaded
+{
 library(dplyr)
 library(purrr)
 library(cluster)
 library(GOSemSim)
 library(org.Aequina.eg.db)
 library(ggVennDiagram)
-
+}
+  
 # -----------------------------
 # 1. Prepare and combine results
 # -----------------------------
@@ -1300,6 +1404,7 @@ grid.newpage()
 grid.draw(tbl)
 ```
 
+## Table of semantic cluster intersections.
 
 ```{r}
 library(dplyr) 
@@ -1342,19 +1447,6 @@ tbl$widths <- unit(c(1.8, 1.1, 3.0, 3.4, 1.0), "in")
 grid.newpage() 
 grid.draw(tbl)
 
-### Save as PDF 
-pdf("intersection_table_publication.pdf", width = 10.5, height = 3.2) 
-grid.draw(tbl) 
-dev.off() 
-
-### Save as PNG `
-
-png("intersection_table_publication.png", width = 3200, 
-    height = 1000, 
-    res = 300) 
-grid.draw(tbl) 
-dev.off() 
-
 
 # Plot venns and table together ----
 # Convert ggplot objects to grobs
@@ -1392,4 +1484,176 @@ grid.draw(combined_plot)
 png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Venn Diagrams/venn_and_intersection_table.png", width = 4200, height = 3000, res = 300)
 grid.draw(combined_plot)
 dev.off()
+```
+
+# Making new figures/plots with semantic cluster data
+
+- Need to add the clustered group names to the original datasets
+  - should be able to achieve this by using the "all_enrichment_results_replaced" df, which contains the semantic representative names in the "Description_QuickGO" column.
+  
+- I'll map them onto the main results dataframes by first changing the name of the column in the replacement file, and then joining them using the GO:IDs as a merging point.
+
+- I should be able to do this with both the nested and long versions of the results files, making it easy to make the supplementary material tables and the main text figures too.
+
+```{r main_text_figures_with_semantic_cluster_representatives}
+# make a new df 
+  # use the "original_ID" column and the "Description_QuickGO" columns
+  # filter for only unique rows
+representative_terms_df <- unique(all_enrichment_results_replaced[c("original_ID", "Description_QuickGO")])
+  # alter column names
+names(representative_terms_df)[names(representative_terms_df) == "original_ID"] <- "ID"
+names(representative_terms_df)[names(representative_terms_df) == "Description_QuickGO"] <- "Representative_GO"
+
+# Now add a new column "representative_GO" to each of the main results dfs:
+ORA_exp1_combined_long_semantic <- merge(
+  ORA_exp1_combined_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+ORA_exp2_combined_long_semantic <- merge(
+  ORA_exp2_combined_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+GSEA_exp2_results_long_semantic <- merge(
+  GSEA_exp2_results_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+# make plot with representative terms
+# ORA plot ----
+library(dplyr)
+library(forcats)
+library(ggplot2)
+library(stringr)
+
+# combine exp1 + exp2
+ORA_combined_compare <- bind_rows(
+  ORA_exp1_combined_long_semantic %>%
+    mutate(Experiment = "Exp1"),
+  ORA_exp2_combined_long_semantic %>%
+    mutate(Experiment = "Exp2")
+)
+
+p_boxes_compare <- ORA_combined_compare %>%
+  mutate(
+    Representative_GO = fct_reorder(
+      Representative_GO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Representative_GO,
+    fill = Experiment,
+    colour = Experiment
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    alpha = 0.5,
+    position = "identity"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL,
+    fill = "Experiment"
+  ) +
+  scale_y_discrete(labels = \(x) str_wrap(x, width = 45)) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) +
+  facet_wrap(
+    ~GO,
+    scales = "free",
+    labeller = labeller(
+      GO = c(
+        biological_processes = "Biological Processes",
+        molecular_functions = "Molecular Functions"
+      )
+    )
+  ) + 
+  scale_fill_manual(values = c("Exp1" = "#4C78A8", "Exp2" = "#E45756")) + 
+  scale_colour_manual(values = c("Exp1" = "#14467d", "Exp2" = "#bd1f1e"))
+
+p_boxes_compare
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/ORA_semantically_clustered_enrichment_plot.png", p_boxes_compare, width = 12, height = 8, dpi = 300)
+
+
+# GSEA plot ----
+p_boxes <- GSEA_exp2_results_long_semantic %>%
+  mutate(
+    Representative_GO = fct_reorder(
+      Representative_GO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Representative_GO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )+
+  coord_cartesian(xlim = c(-0.004, 0.004)) +
+  scale_x_continuous(breaks = seq(-0.004, 0.004, by = 0.001))
+
+p_boxes
+
 ```
