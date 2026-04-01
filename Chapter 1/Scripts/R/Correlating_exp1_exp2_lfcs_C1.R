@@ -121,24 +121,24 @@ merged_DE_results_exp1 <- merge(DEresults_exp1_no_shrinking,
                                 by = 0)
 
 # Make a new df containing only the data we need from this merged dataset
-  # give better column names too
+# give better column names too
 
 str(merged_DE_results_exp1)
 
 Acute_Experiment_Data <- setNames(
-                         merged_DE_results_exp1[, c(
-                           "Row.names",
-                           "log2FoldChange",
-                           "log2FoldChange_Shrunk",
-                           "padj.x"
-                         )],
-                         c(
-                           "gene_id",
-                           "log2FC_exp1",
-                           "log2FC_shrunk_exp1",
-                           "padj_exp1"
-                         )
-                       )
+  merged_DE_results_exp1[, c(
+    "Row.names",
+    "log2FoldChange",
+    "log2FoldChange_Shrunk",
+    "padj.x"
+  )],
+  c(
+    "gene_id",
+    "log2FC_exp1",
+    "log2FC_shrunk_exp1",
+    "padj_exp1"
+  )
+)
 
 # Experiment 2 ----
 ## Build initial DEseq matrix
@@ -193,7 +193,7 @@ merged_df <- merge(
 )
 
 # Correlate raw and shrunk lfcs of both experiments
-  # select rows only where data is contained for all genes
+# select rows only where data is contained for all genes
 
 # non-srhunk data
 cor_df <- merged_df[complete.cases(merged_df[, c("log2FC_exp1", "log2FC_exp2")]), ]
@@ -336,3 +336,30 @@ grid.arrange(p1, p2, ncol = 2)
 png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/lfc_correlation_plots.png", width = 10, height = 5, units = "in", res = 600)
 grid.arrange(p1, p2, ncol = 2)
 dev.off()
+
+# save image to manipulate plots wheneever I want
+# first remove large files
+rm(Acute_Experiment_Data,
+   colData,
+   colData_exp1,
+   colData_exp2,
+   cor_df,
+   countData_exp1,
+   countData_exp2,
+   counts,
+   counts_exp1,
+   counts_exp2,
+   dds,
+   dds_exp1,
+   dds_exp2,
+   DEresults_exp1_no_shrinking,
+   DEresults_exp1_with_shrinking,
+   DEresults_exp2_no_shrinking,
+   DEresults_exp2_with_shrinking,
+   merged_DE_results_exp1,
+   merged_DE_results_exp2,
+   merged_df,
+   Primed_Experiment_Data)
+
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Scripts/R/lfc_correlations.RData")
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Scripts/R/lfc_correlations.RData")
