@@ -182,6 +182,7 @@ DEGs <- DE_results_1[(DE_results_1$padj < 0.1),]
 DEGs <- DEGs[complete.cases(DEGs),]
 DEGs_1 <- as.vector(DEGs[,1])
 length(DEGs_1)
+  # save DEGs list version for other work
 DEGs <- DE_results_2[(DE_results_2$padj < 0.1),]
 DEGs <- DEGs[complete.cases(DEGs),]
 DEGs_2 <- as.vector(DEGs[,1])
@@ -1330,7 +1331,8 @@ p_bp <- ggVennDiagram(
   category.names = names(bp_sets),
   set_color = "black",
       set_size = 3.5,
-  label_alpha = 0
+  label_alpha = 0,
+  label_size = 6
 ) +
   scale_fill_gradient(low = "white", high = "#4c43e8") +
   #coord_equal(clip = "off") +
@@ -1349,7 +1351,8 @@ p_mf <- ggVennDiagram(
   category.names = names(mf_sets),
   set_color = "black",
     set_size = 3.5,
-  label_alpha = 0
+  label_alpha = 0,
+  label_size = 6
 ) +
   scale_fill_gradient(low = "white", high = "#e8a943") +
   coord_equal(clip = "off") +
@@ -1656,4 +1659,96 @@ p_boxes <- GSEA_exp2_results_long_semantic %>%
 
 p_boxes
 
+```
+
+## Make nested dataframes to save with representative GO terms:
+
+```{r save_semantic_clusters_enrichment_results}
+# Now add a new column "representative_GO" to each of the main results dfs:
+ORA_exp1_combined_nested_semantic <- merge(
+  ORA_exp1_combined_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+ORA_exp2_combined_nested_semantic <- merge(
+  ORA_exp2_combined_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+GSEA_exp2_results_nested_semantic <- merge(
+  GSEA_exp2_results_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+# save dataframes
+  # then save as excel files and modify for use in suppllementary materials
+write.csv(ORA_exp1_combined_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_combined_nested_semantic.csv", row.names = FALSE)
+
+write.csv(ORA_exp2_combined_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_combined_nested_semantic.csv", row.names = FALSE)
+
+write.csv(GSEA_exp2_results_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_nested_semantic.csv", row.names = FALSE)
+
+```
+
+
+
+### saving DEGS lists for blastp analysis
+
+```{r}
+DE_results_1 <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv",
+  header = TRUE,
+  sep = ",",
+  stringsAsFactors = FALSE
+)
+
+DE_results_2 <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv",
+  header = TRUE,
+  sep = ",",
+  stringsAsFactors = FALSE
+)
+
+## Perform naming transformation to make gene IDs matching ----
+DE_results_1$X <- gsub("\\.TU", "", DE_results_1$X) # Removing "TU" part of names
+DE_results_1$X <- gsub("path", "mrna", DE_results_1$X) # Replacing "path" -> "mrna"
+DE_results_2$X <- gsub("\\.TU", "", DE_results_2$X) # Removing "TU" part of names
+DE_results_2$X <- gsub("path", "mrna", DE_results_2$X) # Replacing "path" -> "mrna"
+
+# DEGs list for experiment 1
+DEGs <- DE_results_1[DE_results_1$padj < 0.1, ]
+DEGs <- DEGs[complete.cases(DEGs), ]
+DEGs_1 <- as.vector(DEGs[, 1])
+length(DEGs_1)
+
+write.table(
+  DEGs_1,
+  file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEGs_1.txt",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+# DEGs list for experiment 2
+DEGs <- DE_results_2[DE_results_2$padj < 0.1, ]
+DEGs <- DEGs[complete.cases(DEGs), ]
+DEGs_2 <- as.vector(DEGs[, 1])
+length(DEGs_2)
+
+write.table(
+  DEGs_2,
+  file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEGs_2.txt",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
 ```
