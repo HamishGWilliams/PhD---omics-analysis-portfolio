@@ -61,3 +61,5 @@ org.Aequina.eg.db/inst/extdata/
 *.fasta
 *.fa.gz
 *.fasta.gz
+*.fastq.gz
+*.fastq
