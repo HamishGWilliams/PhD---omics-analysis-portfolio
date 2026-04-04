@@ -56,10 +56,12 @@ org.Aequina.eg.db/
 org.Aequina.eg.db/inst/extdata/org.Aequina.eg.sqlite
 org.Aequina.eg.db/inst/extdata/
 
-# Any fasta files
+# Any fasta files and other large sequencing files
 *.fa
 *.fasta
 *.fa.gz
 *.fasta.gz
 *.fastq.gz
 *.fastq
+*.sam
+*.bam
