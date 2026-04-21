@@ -1,0 +1,1859 @@
+---
+title: "Differential Methylated Regions Functional Enrichment Analyses"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: word_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+Performing over representation analysis on the DMR gene lists for both experiments to determine if there is some statistcially enriched terms and functions. This analysis is only going to contribute to highlighting if particular functions are being enriched, and not to remove genes associated to DMRs away from the results and discussion. The results of the DMR anlaysis have already gone through a lengthy and rigouros bout of statistical analyses to get to a final list of DMRs, hence this analysis is only to highlight results which may be of greater importance to the physiological response of actinia equina to their experimental contexts.
+
+# Installing and Loading required packages
+
+```{r check_packages_ClusterProfilerR, message=FALSE, warning=FALSE, results='hide'}
+# Build a function which will automatically detect installed packages and install required packages
+check_packages_ClusterProfileR <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      install.packages(pkg) # installs regular R packages
+      BiocManager::install(pkg) # installs packages requiring BiocManager
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+# Generate a dataframe with a list of packages required
+
+pkg_list_ClusterProfileR<-c("BiocManager", # Have this first to ensure BiocManager packages will be installed
+                            "tidyverse", 
+                            "tibble", 
+                            "stats",
+                            "ggplot2", 
+                            "dplyr", 
+                            "tidyr", 
+                            "ggfortify", 
+                            "knitr",
+                            "clusterProfiler",
+                            "AnnotationForge",
+                            "enrichplot",
+                            "data.table",
+                            "stats",
+                            "plotly",
+                            "ggVennDiagram",
+                            "VennDiagram",
+                            "limma",
+                            "ggridges",
+                            "pathview",
+                            "KEGGREST",
+                            "stringr",
+                            "gridExtra",
+                            "ggside",
+                            "gghalves",
+                            "flextable",
+                            "officer",
+                            "ggh4x"
+                            )
+
+
+# Run the code
+  # NOTE: this code should be run twice, double checking is always good!
+
+# Run Function::
+check_packages_ClusterProfileR(pkg_list_ClusterProfileR)
+# You will need to answer "no" when asked if you want to update packages, otherwise it will take a while to load
+
+# Double Check everything has loaded:
+check_packages_ClusterProfileR(pkg_list_ClusterProfileR)
+```
+
+## convertFractionToNumeric
+
+Used to convert gene ratios in final analyses to numerical values for generating figures
+
+```{r convertFractionToNumeric, message=FALSE, warning=FALSE}
+convertFractionToNumeric <- function(fraction) {
+  fraction_parts <- strsplit(fraction, "/")[[1]]
+  numerator <- as.numeric(fraction_parts[1])
+  denominator <- as.numeric(fraction_parts[2])
+  numeric_value <- numerator / denominator
+  return(numeric_value)
+}
+
+
+# Make function to capture methylation data for each gene in the GSEA results
+get_methDiff_data <- function(core_enrichment, meth_data) {
+  genes <- unlist(strsplit(core_enrichment, "/"))
+  lfc_values <- meth_data$meth.diff[match(genes, meth_data$gene_id_labelling)]
+  paste(lfc_values, collapse = "/")
+}
+```
+
+# Importing Data:
+
+```{r import_data}
+# load in the gene lists for experiments 1 & 2;
+exp1_DMR_list <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/Exp1_DMRs_gene_id_matched.txt", header = T, sep = '\t')
+exp1_DMR_list <- subset(exp1_DMR_list[exp1_DMR_list$p_fdr <= 0.1,])
+exp1_DMR_list<- as.vector(exp1_DMR_list[,19])
+exp2_DMR_list <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/Exp2_DMRs_gene_id_matched.txt", header = T, sep = '\t')
+exp2_DMR_list <- subset(exp2_DMR_list[exp2_DMR_list$p_fdr <= 0.1,])
+exp2_DMR_list<- as.vector(exp2_DMR_list[,19])
+
+## Merge Blastp and GO terms files together
+BP_MF_Terms <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/UNIPROT_results.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  quote = ""
+)
+
+matching_file <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/genome_matching_file.txt",
+  header = FALSE,
+  sep = "\t",
+  stringsAsFactors = FALSE
+)
+
+matching_file <- matching_file %>%
+  group_by(V1) %>%
+  filter(V11 == min(V11)) %>%
+  ungroup()
+
+matching_file <- unique(matching_file)
+
+# Change the name of the columns to be identical ----
+{
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(matching_file)[names(matching_file) == "V1"] <- "GENE"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+}
+  
+# Merge all matched BLAST rows with UniProt GO annotations
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
+
+# -------------------------------
+# Helper function:
+# expands one GO column so that each GO term becomes its own row
+# -------------------------------
+expand_go_column_mem <- function(
+  df,
+  go_col,
+  gene_col = "GENE",
+  id_col = "ID",
+  deduplicate = FALSE
+) {
+  empty_out <- data.frame(
+    GENE = character(),
+    ID   = character(),
+    GO   = character(),
+    TERM = character(),
+    stringsAsFactors = FALSE
+  )
+
+  go_text  <- df[[go_col]]
+  gene_vec <- df[[gene_col]]
+  id_vec   <- df[[id_col]]
+
+  # Keep only usable rows up front
+  keep <- !is.na(go_text) &
+          trimws(go_text) != "" &
+          !is.na(gene_vec) &
+          !is.na(id_vec)
+
+  if (!any(keep)) {
+    return(empty_out)
+  }
+
+  go_text  <- go_text[keep]
+  gene_vec <- gene_vec[keep]
+  id_vec   <- id_vec[keep]
+
+  # First pass: count how many GO entries will be created
+  counts <- integer(length(go_text))
+
+  for (i in seq_along(go_text)) {
+    pieces <- trimws(strsplit(go_text[i], ";", fixed = TRUE)[[1]])
+    counts[i] <- sum(grepl("\\[GO:[0-9]{7}\\]", pieces))
+  }
+
+  total_rows <- sum(counts)
+
+  if (total_rows == 0L) {
+    return(empty_out)
+  }
+
+  # Preallocate final vectors once
+  GENE <- character(total_rows)
+  ID   <- character(total_rows)
+  GO   <- character(total_rows)
+  TERM <- character(total_rows)
+
+  pos <- 1L
+
+  # Second pass: fill preallocated vectors
+  for (i in seq_along(go_text)) {
+    if (counts[i] == 0L) next
+
+    pieces <- trimws(strsplit(go_text[i], ";", fixed = TRUE)[[1]])
+    pieces <- pieces[grepl("\\[GO:[0-9]{7}\\]", pieces)]
+
+    n_terms <- length(pieces)
+    idx <- pos:(pos + n_terms - 1L)
+
+    GENE[idx] <- gene_vec[i]
+    ID[idx]   <- id_vec[i]
+    GO[idx]   <- sub(".*\\[(GO:[0-9]{7})\\].*", "\\1", pieces)
+    TERM[idx] <- trimws(sub("\\s*\\[GO:[0-9]{7}\\]\\s*$", "", pieces))
+
+    pos <- pos + n_terms
+  }
+
+  out <- data.frame(
+    GENE = GENE,
+    ID   = ID,
+    GO   = GO,
+    TERM = TERM,
+    stringsAsFactors = FALSE
+  )
+
+  rownames(out) <- NULL
+
+  if (deduplicate) {
+    out <- unique(out)
+    rownames(out) <- NULL
+  }
+
+  out
+}
+
+# -------------------------------
+# Expand BP and MF properly
+# -------------------------------
+# remove files for space
+rm(BP_MF_Terms,
+   matching_file)
+  
+  # Still having memory issue, need to split file in half and run separately
+# -------------------------------
+# Split merged_df into thirds
+# -------------------------------
+n <- nrow(merged_df)
+
+idx1 <- 1:floor(n / 3)
+idx2 <- (floor(n / 3) + 1):floor(2 * n / 3)
+idx3 <- (floor(2 * n / 3) + 1):n
+
+part1 <- merged_df[idx1, , drop = FALSE]
+part2 <- merged_df[idx2, , drop = FALSE]
+part3 <- merged_df[idx3, , drop = FALSE]
+
+rm(merged_df,
+   idx1,
+   idx2,
+   idx3,
+   n)
+
+# -------------------------------
+# Expand GO:BP in chunks
+# -------------------------------
+BP_long_1 <- expand_go_column_mem(part1, "GO:BP", deduplicate = FALSE)
+BP_long_2 <- expand_go_column_mem(part2, "GO:BP", deduplicate = FALSE)
+BP_long_3 <- expand_go_column_mem(part3, "GO:BP", deduplicate = FALSE)
+
+BP_long <- unique(rbind(BP_long_1, BP_long_2, BP_long_3))
+rm(BP_long_1, BP_long_2, BP_long_3)
+
+# -------------------------------
+# Expand GO:MF in chunks
+# -------------------------------
+MF_long_1 <- expand_go_column_mem(part1, "GO:MF", deduplicate = FALSE)
+MF_long_2 <- expand_go_column_mem(part2, "GO:MF", deduplicate = FALSE)
+MF_long_3 <- expand_go_column_mem(part3, "GO:MF", deduplicate = FALSE)
+
+MF_long <- unique(rbind(MF_long_1, MF_long_2, MF_long_3))
+rm(MF_long_1, MF_long_2, MF_long_3)
+
+# Only make downstream objects after BP_long / MF_long are finished
+GENES_BP <- unique(BP_long[, c("GO", "GENE")])
+GENES_MF <- unique(MF_long[, c("GO", "GENE")])
+
+TERMs_BP <- unique(BP_long[, c("GO", "TERM")])
+TERMs_MF <- unique(MF_long[, c("GO", "TERM")])
+
+# remove redundant dfs now
+rm(part1,
+   part2,
+   part3,
+   BP_long,
+   MF_long)
+
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/BP_MF_long_extractions.RData")
+
+# load when needed
+  # load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/BP_MF_long_extractions.RData")
+```
+
+# Creating loop to stratify the analysis per region type
+
+```{r stratified_ORA_exp1}
+# Load required packages
+library(clusterProfiler)
+
+# Load DMR data
+dmr_data <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/Exp1_DMRs_gene_id_matched.txt", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+
+# Set the target region to analyze
+  # promoter # results
+  # three_prime_UTR # no results
+  # exon #results
+  # gene #results
+  # five_prime_UTR # no results
+  # downstream_region #  no results
+  # dispersed_repeat #results
+  # ncRNA_gene # no significant gene IDs
+{
+target_region <- "dispersed_repeat"  # Change this to the region you want to analyze
+
+# Subset data to selected region
+region_data <- dmr_data[dmr_data$region == target_region, ]
+
+# Filter for significant DMRs
+sig_data <- region_data[region_data$p_fdr <= 0.1, ]
+
+# keep the gene-context mapping from the filtered DMR data:
+gene_context_map <- sig_data[!is.na(sig_data$gene_id_labelling) & sig_data$gene_id_labelling != "", 
+                             c("gene_id_labelling", "context")]
+
+
+# Extract gene IDs, removing NA or blank
+gene_ids <- as.character(sig_data$gene_id_labelling)
+gene_ids <- gene_ids[!is.na(gene_ids) & gene_ids != ""]
+
+# Proceed only if there are valid gene IDs
+if (length(gene_ids) > 0) {
+
+  # Run ORA for Biological Processes (BP)
+  ORA_BP <- enricher(gene = gene_ids,
+                     TERM2GENE = GENES_BP,
+                     TERM2NAME = TERMs_BP,
+                     minGSSize = 1,
+                     pvalueCutoff = 1,
+                     qvalueCutoff = 1)
+
+  # Run ORA for Molecular Functions (MF)
+  ORA_MF <- enricher(gene = gene_ids,
+                     TERM2GENE = GENES_MF,
+                     TERM2NAME = TERMs_MF,
+                     minGSSize = 1,
+                     pvalueCutoff = 1,
+                     qvalueCutoff = 1)
+
+  # Extract results
+  bp_results <- ORA_BP@result
+    # If geneID is delimited (e.g., "GENE1/GENE2/GENE3"), split it
+  bp_expanded <- bp_results %>%
+    mutate(geneID = strsplit(as.character(geneID), "/")) %>%
+    unnest(geneID)
+  # Add context by joining
+  bp_expanded <- left_join(bp_expanded, gene_context_map,
+                           by = c("geneID" = "gene_id_labelling"),
+                           relationship = "many-to-many")
+  
+
+  mf_results <- ORA_MF@result
+      # If geneID is delimited (e.g., "GENE1/GENE2/GENE3"), split it
+  mf_expanded <- mf_results %>%
+    mutate(geneID = strsplit(as.character(geneID), "/")) %>%
+    unnest(geneID)
+  # Add context by joining
+  mf_expanded <- left_join(mf_expanded, gene_context_map,
+                           by = c("geneID" = "gene_id_labelling"),
+                           relationship = "many-to-many")
+
+  # Tag result source
+  bp_expanded$GO <- "Biological Processes"
+  mf_expanded$GO <- "Molecular Functions"
+
+  # Combine and annotate results
+  all_results <- rbind(bp_expanded, mf_expanded)
+  all_results$region <- target_region
+  all_results$experiment <- "Acute Experiment"
+
+  # Convert ratios to numeric
+  convertFractionToNumeric <- function(x) {
+    parts <- strsplit(as.character(x), "/")[[1]]
+    if (length(parts) == 2) {
+      return(as.numeric(parts[1]) / as.numeric(parts[2]))
+    } else {
+      return(NA)
+    }
+  }
+
+  all_results$GeneRatio <- sapply(all_results$GeneRatio, convertFractionToNumeric)
+  all_results$BgRatio <- sapply(all_results$BgRatio, convertFractionToNumeric)
+
+  # Save to CSV
+  assign(paste0("ORA_results_", target_region, "_exp1"), all_results)
+  output_file <- paste0("ORA_results_", target_region, ".csv")
+  write.csv(all_results, output_file, row.names = FALSE)
+
+  message("Analysis complete and results saved.")
+} else {
+  message("No significant gene IDs found for the selected region.")
+}
+}
+
+# Combined all results together
+ORA_results_exp1_combined <- rbind(ORA_results_dispersed_repeat_exp1,
+                                   ORA_results_exon_exp1,
+                                   ORA_results_gene_exp1,
+                                   ORA_results_promoter_exp1)
+
+# Plotting Data
+ORA_results_exp1_combined <- ORA_results_exp1_combined[order(ORA_results_exp1_combined$GeneRatio), ]
+
+ORA_results_exp1_combined_clean <- unique(ORA_results_exp1_combined)
+
+
+ORA_exp1_dotplot <- ggplot(data = ORA_results_exp1_combined_clean, 
+                              aes(y = reorder(Description, 
+                                              Count, 
+                                              increasing = T), 
+                                  x = GeneRatio, 
+                                  color = region)) + 
+                       geom_point(aes(size = Count), 
+                                  stroke = 4) +
+                       labs(title = "Biological Processes", y = "GO Description", x = "Gene Ratio") +
+                       theme_light() + 
+                       #scale_color_gradient(low = "red", high = "blue") + 
+                       scale_size_continuous(breaks = seq(min(ORA_results_exp1_combined$Count), max(ORA_results_exp1_combined$Count), by = 1)) +
+                       theme(
+                         legend.spacing = unit(0.5, "cm"),         # Adjust overall legend spacing
+                         legend.key.height = unit(3, "lines"), # Adjust the height between size examples
+                         axis.text.y = element_text(size = 11)
+                         ) + 
+                       guides(size = guide_legend(title = "Count"))  + 
+                       scale_y_discrete(labels = function(x) str_wrap(x, width = 28)) + # Adjust width for line breaks 
+                       facet_wrap(~GO, scales = "free")
+
+# Merge ORA_exp1_BP results and dotplot together, and rm dotplot
+plot(ORA_exp1_dotplot)
+
+## Export Dataframe results
+write.csv(ORA_results_exp1_combined_clean, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Results/ORA_results_exp1_combined.csv", row.names = FALSE)
+
+# Save current Environemnt:
+save.image(file = "GSEA_exp1_prep.RData")
+```
+
+```{r looping_GSEA_by_region_exp1}
+library(clusterProfiler)
+library(dplyr)
+library(ggplot2)
+library(ggforce)
+library(tidyr)
+library(stringr)
+
+# Read and prep data
+exp1_DM_region_data <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/Exp1_DMRs_gene_id_matched.txt", header = TRUE, sep = '\t')
+exp1_DM_region_data$region <- as.factor(exp1_DM_region_data$region)
+
+# Make df to store data
+GSEA_exp1_data <- data.frame()
+
+# temp region_type
+# region_type = "gene"
+
+# Loop over each region
+for (region_type in levels(exp1_DM_region_data$region)) {
+  
+  message("Processing region: ", region_type)
+  
+  # Subset to region
+  region_data <- exp1_DM_region_data[exp1_DM_region_data$region == region_type, ]
+  
+  # Build gene list
+  geneList <- region_data[, 7]
+  names(geneList) <- as.character(region_data[, 19])
+  geneList <- sort(geneList, decreasing = TRUE)
+  
+  # Skip if too few genes
+  if (length(geneList) < 50) {
+    message("Skipping ", region_type, " — too few genes.")
+    next
+  }
+  
+  # Try GSEA for BP
+  GSEA_BP <- tryCatch({
+    set.seed(100)
+    res <- GSEA(geneList, TERM2GENE = GENES_BP, TERM2NAME = TERMs_BP, pvalueCutoff = 0.1)
+    res@result$GO <- "biological_processes"
+    res@result
+  }, error = function(e) {
+    message("No BP enrichment for ", region_type)
+    return(NULL)
+  })
+  
+  # Try GSEA for MF
+  GSEA_MF <- tryCatch({
+    set.seed(100)
+    res <- GSEA(geneList, TERM2GENE = GENES_MF, TERM2NAME = TERMs_MF, pvalueCutoff = 0.1)
+    res@result$GO <- "molecular_function"
+    res@result
+  }, error = function(e) {
+    message("No MF enrichment for ", region_type)
+    return(NULL)
+  })
+  
+  # Skip if both GSEAs failed
+  if (is.null(GSEA_BP) && is.null(GSEA_MF)) {
+    message("Skipping ", region_type, " — no significant enrichment in BP or MF.")
+    next
+  }
+  
+  # Combine and filter results
+  all_res <- bind_rows(GSEA_BP, GSEA_MF)
+  all_res$region <- region_type
+  sig_res <- all_res[all_res$p.adjust < 0.1, ]
+  
+  if (nrow(sig_res) == 0) {
+    message("No significant terms after p.adjust filtering for ", region_type)
+    next
+  }
+  
+  # Extract methylation differences per core enrichment
+  sig_res <- sig_res %>%
+    rowwise() %>%
+    mutate(methDiff_combined = get_methDiff_data(core_enrichment, region_data))
+  
+  sig_res$Gene_IDs_list <- strsplit(as.character(sig_res$core_enrichment), "/")
+  sig_res$MethDiff_list <- strsplit(as.character(sig_res$methDiff_combined), "/")
+  
+ #  expanded <- sig_res %>%
+ #    tidyr::unnest(c(Gene_IDs_list, MethDiff_list))
+ #  expanded$MethDiff_list <- as.numeric(expanded$MethDiff_list)
+ #  expanded <- expanded %>% distinct()
+ #  expanded$WrappedDescription <- str_wrap(expanded$Description, width = 20)
+ #  # Plot
+ #  g <- ggplot(expanded, aes(
+ #    x = reorder(WrappedDescription, MethDiff_list),
+ #    y = MethDiff_list
+ #  )) +
+ #    geom_half_boxplot(
+ #      aes(fill = enrichmentScore,
+ #          group = interaction(WrappedDescription, ID)),
+ #      side = "l",
+ #      alpha = 0.8
+ #    ) +
+ #    geom_half_point(
+ #      aes(colour = enrichmentScore,
+ #          group = interaction(WrappedDescription, ID)),
+ #      side = "r",
+ #      alpha = 0.4,
+ #      size = 2
+ #    ) +
+ #    coord_flip() +
+ #    theme_classic() +
+ #    facet_wrap(~GO, scales = "free",
+ #               labeller = as_labeller(
+ #                 c("biological_processes" = "Biological Processes",
+ #                   "molecular_function" = "Molecular Functions")
+ #               )
+ #    ) +
+ #    scale_fill_gradient(low = "#2396de", high = "#db183f", limits = c(-1,1)) +
+ #    scale_colour_gradient(low = "#2396de", high = "#db183f", limits = c(-1,1), guide = "none") +
+ #    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+ #    labs(
+ #      y = "Methylation Difference (%)",
+ #      x = "Gene Ontology (GO)",
+ #      fill = "Enrichment Score",
+ #      title = paste("GSEA for region:", region_type)
+ #    )
+ #  
+ #  # Save plot
+ #  out_file <- paste0("GSEA_", region_type, "_plot.png")
+ #  ggsave(out_file, g, width = 18, height = 12)
+ #  
+ #  message("Saved plot to ", out_file)
+  
+    # Add data to running file
+  GSEA_exp1_data <- rbind(GSEA_exp1_data, sig_res)
+  
+}
+
+
+# Continue to plotting
+{
+  expanded_exp1 <- GSEA_exp1_data %>%
+    tidyr::unnest(c(Gene_IDs_list, MethDiff_list))
+  expanded_exp1$MethDiff_list <- as.numeric(expanded_exp1$MethDiff_list)
+  expanded_exp1 <- expanded_exp1 %>% distinct()
+  expanded_exp1$WrappedDescription <- str_wrap(expanded_exp1$Description, width = 20)
+}
+
+# Plot
+g <- ggplot(expanded_exp1, aes(
+  x = reorder(WrappedDescription, MethDiff_list),
+  y = MethDiff_list
+)) +
+  geom_boxplot(
+    aes(group = interaction(WrappedDescription, ID)),
+    fill = "lightgrey",
+    #fill = "enrichmentScore",
+   # side = "l",
+    alpha = 1
+  ) +
+  geom_jitter(
+    aes(colour = region),
+   # side = "r",
+    alpha = 0.7,
+    size = 3,
+  #  position = position_nudge(x = 0),
+   width = 0.2
+  ) +
+  coord_flip() +
+  theme_classic() +
+  facet_wrap(~GO, scales = "free",
+             labeller = as_labeller(
+               c("biological_processes" = "Biological Processes",
+                 "molecular_function" = "Molecular Functions")
+             )
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  labs(
+    y = "Methylation Difference (%)",
+    x = "Gene Ontology (GO)",
+    #fill = "Enrichment Score",
+    title ="GSEA for Acute Experiment"
+  ) +
+scale_color_manual(
+  name = "Region",
+  values = c("red", "#a1d61a","#0072B2", "#CC79A7"),
+  labels = c("Repeat","Exon", "Gene", "Promoter")
+)
+
+g
+```
+
+# stratified ORA exp2
+
+```{r stratified_ORA_exp2}
+# Load DMR data
+dmr_data <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/exp2_DMRs_gene_id_matched.txt", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+
+# Set the target region to analyze
+  # promoter # results
+  # three_prime_UTR # no results
+  # exon # results
+  # gene # results
+  # five_prime_UTR # no sig gene ids
+  # downstream_region # results
+  # dispersed_repeat  # results
+  # ncRNA_gene # no results
+{
+target_region <- "ncRNA_gene"  # Change this to the region you want to analyze
+
+# Subset data to selected region
+region_data <- dmr_data[dmr_data$region == target_region, ]
+
+# Filter for significant DMRs
+sig_data <- region_data[region_data$p_fdr <= 0.1, ]
+
+# keep the gene-context mapping from the filtered DMR data:
+gene_context_map <- sig_data[!is.na(sig_data$gene_id_labelling) & sig_data$gene_id_labelling != "", 
+                             c("gene_id_labelling", "context")]
+
+
+# Extract gene IDs, removing NA or blank
+gene_ids <- as.character(sig_data$gene_id_labelling)
+gene_ids <- gene_ids[!is.na(gene_ids) & gene_ids != ""]
+
+# Proceed only if there are valid gene IDs
+if (length(gene_ids) > 0) {
+
+  # Run ORA for Biological Processes (BP)
+  ORA_BP <- enricher(gene = gene_ids,
+                     TERM2GENE = GENES_BP,
+                     TERM2NAME = TERMs_BP,
+                     minGSSize = 1,
+                     pvalueCutoff = 1,
+                     qvalueCutoff = 1)
+
+  # Run ORA for Molecular Functions (MF)
+  ORA_MF <- enricher(gene = gene_ids,
+                     TERM2GENE = GENES_MF,
+                     TERM2NAME = TERMs_MF,
+                     minGSSize = 1,
+                     pvalueCutoff = 1,
+                     qvalueCutoff = 1)
+
+  # Extract results
+  bp_results <- ORA_BP@result
+    # If geneID is delimited (e.g., "GENE1/GENE2/GENE3"), split it
+  bp_expanded <- bp_results %>%
+    mutate(geneID = strsplit(as.character(geneID), "/")) %>%
+    unnest(geneID)
+  # Add context by joining
+  bp_expanded <- left_join(bp_expanded, gene_context_map,
+                           by = c("geneID" = "gene_id_labelling"),
+                           relationship = "many-to-many")
+  
+
+  mf_results <- ORA_MF@result
+      # If geneID is delimited (e.g., "GENE1/GENE2/GENE3"), split it
+  mf_expanded <- mf_results %>%
+    mutate(geneID = strsplit(as.character(geneID), "/")) %>%
+    unnest(geneID)
+  # Add context by joining
+  mf_expanded <- left_join(mf_expanded, gene_context_map,
+                           by = c("geneID" = "gene_id_labelling"),
+                           relationship = "many-to-many")
+
+  # Tag result source
+  bp_expanded$GO <- "Biological Processes"
+  mf_expanded$GO <- "Molecular Functions"
+
+  # Combine and annotate results
+  all_results <- rbind(bp_expanded, mf_expanded)
+  all_results$region <- target_region
+  all_results$experiment <- "Primed Experiment"
+
+  # Convert ratios to numeric
+  convertFractionToNumeric <- function(x) {
+    parts <- strsplit(as.character(x), "/")[[1]]
+    if (length(parts) == 2) {
+      return(as.numeric(parts[1]) / as.numeric(parts[2]))
+    } else {
+      return(NA)
+    }
+  }
+
+  all_results$GeneRatio <- sapply(all_results$GeneRatio, convertFractionToNumeric)
+  all_results$BgRatio <- sapply(all_results$BgRatio, convertFractionToNumeric)
+
+  # Save to CSV
+  assign(paste0("ORA_results_", target_region, "_exp2"), all_results)
+  output_file <- paste0("ORA_results_", target_region, ".csv")
+  write.csv(all_results, output_file, row.names = FALSE)
+
+  message("Analysis complete and results saved.")
+} else {
+  message("No significant gene IDs found for the selected region.")
+}
+}
+
+# Combined all results together
+ORA_results_exp2_combined <- rbind(ORA_results_dispersed_repeat_exp2,
+                                   ORA_results_exon_exp2,
+                                   ORA_results_gene_exp2,
+                                   ORA_results_downstream_region_exp2,
+                                   ORA_results_promoter_exp2)
+
+# Plotting Data
+ORA_results_exp2_combined <- ORA_results_exp2_combined[order(ORA_results_exp2_combined$GeneRatio), ]
+
+ORA_results_exp2_combined_clean <- unique(ORA_results_exp2_combined)
+
+
+ORA_exp2_dotplot <- ggplot(data = ORA_results_exp2_combined_clean, 
+                              aes(y = reorder(Description, 
+                                              Count, 
+                                              increasing = T), 
+                                  x = GeneRatio, 
+                                  color = region)) + 
+                       geom_point(aes(size = Count), 
+                                  stroke = 4) +
+                       labs(title = "Biological Processes", y = "GO Description", x = "Gene Ratio") +
+                       theme_light() + 
+                       #scale_color_gradient(low = "red", high = "blue") + 
+                       scale_size_continuous(breaks = seq(min(ORA_results_exp2_combined$Count), max(ORA_results_exp2_combined$Count), by = 1)) +
+                       theme(
+                         legend.spacing = unit(0.5, "cm"),         # Adjust overall legend spacing
+                         legend.key.height = unit(3, "lines"), # Adjust the height between size examples
+                         axis.text.y = element_text(size = 11)
+                         ) + 
+                       guides(size = guide_legend(title = "Count"))  + 
+                       scale_y_discrete(labels = function(x) str_wrap(x, width = 28)) + # Adjust width for line breaks 
+                       facet_wrap(~GO, scales = "free")
+
+
+# Merge ORA_exp2_BP results and dotplot together, and rm dotplot
+plot(ORA_exp2_dotplot)
+
+## Export Dataframe results
+write.csv(ORA_results_exp2_combined, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Results/ORA_results_exp2_combined_clean.csv", row.names = FALSE)
+
+
+
+# ==== Making lollipop plots ====
+# Combining exp1 & exp2 data
+ORA_results_combined <- rbind(ORA_results_exp1_combined_clean,
+                              ORA_results_exp2_combined_clean)
+
+ORA_results_combined$experiment <- factor(ORA_results_combined$experiment)
+#ORA_results_combined <- ORA_results_combined[ORA_results_combined$p.adjust <= 0.1,]
+ORA_results_combined <- ORA_results_combined[order(ORA_results_combined$GeneRatio), ]
+
+# Lollipop plot
+ora_lollipop <- ggplot(ORA_results_combined, 
+       aes(y = reorder(Description, GeneRatio, FUN = min), 
+           x = GeneRatio,
+           color = region)) + 
+  geom_segment(aes(x = 0, 
+                   xend = GeneRatio, 
+                   yend = Description), 
+               color = "grey60", linewidth = 1) + 
+  geom_point(aes(size = Count, color = region)) + 
+  #scale_color_gradient(low = "#1675e0", high = "#e8c410", name = "p.adjust") +
+    scale_color_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73",  "#0072B2",  "#CC79A7"),
+    labels = c("Repeat", "Downstream", "Exon", "Gene", "Promoter")
+  ) +
+  scale_size_continuous(name = "Gene Count", range = c(4, 10)) +
+  labs(x = "Gene Ratio",
+       y = "GO Term") +
+  theme_light() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(size = 8),
+    axis.title = element_text(size = 10),
+    strip.text = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  ) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 45)) +
+  facet_wrap(~experiment~GO, scales = "free_y") +
+  scale_x_continuous(limits = c(0, 1), breaks = c(0,0.2,0.4,0.6,0.8,1))
+
+ora_lollipop
+
+ggsave("ORA_lollipop_DMRs.png", ora_lollipop, width = 25, height = 25, units = "cm")
+
+
+## Export Dataframe resultsexperiment## Export Dataframe results
+write.csv(ORA_results_combined, "ORA_results_combined.csv", row.names = FALSE)
+
+# read QUICKGO version of combined ORA
+ORA_results_combined_named <- read.csv("ORA_results_combined_QUICKGO.csv", header = T, sep = ',')
+ORA_results_combined_named$experiment <- factor(ORA_results_combined_named$experiment)
+ORA_results_combined_named <- ORA_results_combined_named[order(ORA_results_combined_named$GeneRatio), ]
+ORA_results_combined_named$enrichment <- ifelse(
+  ORA_results_combined_named$p.adjust < 0.1,
+  "enriched",
+  "non-enriched"
+)
+ORA_results_combined_named$Count <- as.integer(ORA_results_combined_named$Count)  
+
+# Lollipop plot
+ORA_lolli <- ggplot(ORA_results_combined_named #[ORA_results_combined_named$experiment == "Primed Experiment",]
+                    , 
+       aes(y = reorder(Description2, GeneRatio, FUN = min), 
+           x = GeneRatio,
+           color = region,
+           shape = enrichment)) + 
+  geom_segment(aes(x = 0, 
+                   xend = GeneRatio, 
+                   yend = Description2), 
+               color = "grey60", linewidth = 1) + 
+  geom_point(aes(size = Count, color = region)) + 
+  #scale_color_gradient(low = "#1675e0", high = "#e8c410", name = "p.adjust") +
+    scale_color_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73",  "#0072B2",  "#CC79A7"),
+    labels = c("Repeat", "Downstream", "Exon", "Gene", "Promoter")
+  ) +
+  scale_size_continuous(
+  name = "Gene Count", 
+  range = c(3, 7),
+  #breaks = sort(unique(ORA_results_combined_named$Count)), 
+  labels = function(x) as.integer(x)
+) +
+  theme_light() +
+  theme(
+    axis.text.y = element_text(size = 7),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 12),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9),
+
+  ) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 45)) +
+  facet_wrap(~experiment~GO, scales = "free_y") +
+  scale_x_continuous(limits = c(0, 0.8), breaks = c(0,0.2,0.4,0.6,0.8)) +
+  theme(
+    strip.text = element_text(size = 10, margin = margin(0, 0, 2, 0)) #, strip.background = element_blank()
+  ) +
+  labs(
+  x = "Gene Ratio",
+  y = "Description"
+)
+
+
+ORA_lolli
+
+ggsave("ORA_lollipop_plot.png", ORA_lolli, width = 25, height = 25, units = "cm")
+
+```
+
+## GSEA exp2
+
+### Loop for GSEA exp2
+
+```{r looping_GSEA_by_region_exp2}
+library(clusterProfiler)
+library(dplyr)
+library(ggplot2)
+library(ggforce)
+library(tidyr)
+library(stringr)
+
+# Read and prep data
+exp2_DM_region_data <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 2/Data/exp2_DMRs_gene_id_matched.txt", header = TRUE, sep = '\t')
+exp2_DM_region_data$region <- as.factor(exp2_DM_region_data$region)
+
+# Make df to store data
+GSEA_exp2_data <- data.frame()
+
+# temp region_type
+# region_type = "gene"
+
+# Loop over each region
+for (region_type in levels(exp2_DM_region_data$region)) {
+  
+  message("Processing region: ", region_type)
+  
+  # Subset to region
+  region_data <- exp2_DM_region_data[exp2_DM_region_data$region == region_type, ]
+  
+  # Build gene list
+  geneList <- region_data[, 7]
+  names(geneList) <- as.character(region_data[, 19])
+  geneList <- sort(geneList, decreasing = TRUE)
+  
+  # Skip if too few genes
+  if (length(geneList) < 50) {
+    message("Skipping ", region_type, " — too few genes.")
+    next
+  }
+  
+  # Try GSEA for BP
+  GSEA_BP <- tryCatch({
+    set.seed(100)
+    res <- GSEA(geneList, TERM2GENE = GENES_BP, TERM2NAME = TERMs_BP, pvalueCutoff = 0.1)
+    res@result$GO <- "biological_processes"
+    res@result
+  }, error = function(e) {
+    message("No BP enrichment for ", region_type)
+    return(NULL)
+  })
+  
+  # Try GSEA for MF
+  GSEA_MF <- tryCatch({
+    set.seed(100)
+    res <- GSEA(geneList, TERM2GENE = GENES_MF, TERM2NAME = TERMs_MF, pvalueCutoff = 0.1)
+    res@result$GO <- "molecular_function"
+    res@result
+  }, error = function(e) {
+    message("No MF enrichment for ", region_type)
+    return(NULL)
+  })
+  
+  # Skip if both GSEAs failed
+  if (is.null(GSEA_BP) && is.null(GSEA_MF)) {
+    message("Skipping ", region_type, " — no significant enrichment in BP or MF.")
+    next
+  }
+  
+  # Combine and filter results
+  all_res <- bind_rows(GSEA_BP, GSEA_MF)
+  all_res$region <- region_type
+  sig_res <- all_res[all_res$p.adjust < 0.1, ]
+  
+  if (nrow(sig_res) == 0) {
+    message("No significant terms after p.adjust filtering for ", region_type)
+    next
+  }
+  
+  # Extract methylation differences per core enrichment
+  sig_res <- sig_res %>%
+    rowwise() %>%
+    mutate(methDiff_combined = get_methDiff_data(core_enrichment, region_data))
+  
+  sig_res$Gene_IDs_list <- strsplit(as.character(sig_res$core_enrichment), "/")
+  sig_res$MethDiff_list <- strsplit(as.character(sig_res$methDiff_combined), "/")
+  
+  
+  # no longer making the individual plots:
+  {
+ # expanded <- sig_res %>%
+ #   tidyr::unnest(c(Gene_IDs_list, MethDiff_list))
+ # expanded$MethDiff_list <- as.numeric(expanded$MethDiff_list)
+ # expanded <- expanded %>% distinct()
+ # expanded$WrappedDescription <- str_wrap(expanded$Description, width = 20)
+ # # Plot
+ # g <- ggplot(expanded, aes(
+ #   x = reorder(WrappedDescription, MethDiff_list),
+ #   y = MethDiff_list
+ # )) +
+ #   geom_half_boxplot(
+ #     aes(fill = enrichmentScore,
+ #         group = interaction(WrappedDescription, ID)),
+ #     side = "l",
+ #     alpha = 0.8
+ #   ) +
+ #   geom_half_point(
+ #     aes(colour = enrichmentScore,
+ #         group = interaction(WrappedDescription, ID)),
+ #     side = "r",
+ #     alpha = 0.4,
+ #     size = 2
+ #   ) +
+ #   coord_flip() +
+ #   theme_classic() +
+ #   facet_wrap(~GO, scales = "free",
+ #              labeller = as_labeller(
+ #                c("biological_processes" = "Biological Processes",
+ #                  "molecular_function" = "Molecular Functions")
+ #              )
+ #   ) +
+ #   scale_fill_gradient(low = "#2396de", high = "#db183f", limits = c(-1,1)) +
+ #   scale_colour_gradient(low = "#2396de", high = "#db183f", limits = c(-1,1), guide = "none") +
+ #   geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+ #   labs(
+ #     y = "Methylation Difference (%)",
+ #     x = "Gene Ontology (GO)",
+ #     fill = "Enrichment Score",
+ #     title = paste("GSEA for region:", region_type)
+ #   )
+ # 
+ # # Save plot
+ # out_file <- paste0("GSEA_", region_type, "_plot.png")
+ # ggsave(out_file, g, width = 18, height = 12)
+ # 
+ # message("Saved plot to ", out_file)
+  }
+    # Add data to running file
+  GSEA_exp2_data <- rbind(GSEA_exp2_data, sig_res)
+  
+}
+
+# Continue to plotting
+{
+  expanded_exp2 <- GSEA_exp2_data %>%
+    tidyr::unnest(c(Gene_IDs_list, MethDiff_list))
+  expanded_exp2$MethDiff_list <- as.numeric(expanded_exp2$MethDiff_list)
+  expanded_exp2 <- expanded_exp2 %>% distinct()
+  expanded_exp2$WrappedDescription <- str_wrap(expanded_exp2$Description, width = 20)
+}
+
+
+  # Plot
+  g <- ggplot(expanded_exp2, aes(
+    x = reorder(WrappedDescription, MethDiff_list),
+    y = MethDiff_list
+  )) +
+    geom_boxplot(
+      aes(group = interaction(WrappedDescription, ID)),
+      fill = "lightgrey",
+      #side = "l",
+      alpha = 1
+    ) +
+    geom_jitter(
+      aes(colour = region),
+      #side = "r",
+      alpha = 0.7,
+      size = 3,
+      width = 0.1
+    ) +
+    coord_flip() +
+    theme_classic() +
+    facet_wrap(~GO, scales = "free",
+               labeller = as_labeller(
+                 c("biological_processes" = "Biological Processes",
+                   "molecular_function" = "Molecular Functions")
+               )
+    ) +
+
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+    labs(
+      y = "Methylation Difference (%)",
+      x = "Gene Ontology (GO)",
+      #fill = "Enrichment Score"
+    ) +
+
+  scale_color_manual(
+    name = "Region",
+    values = c("red", "#a1d61a","#0072B2", "#CC79A7"),
+    labels = c("Repeat","Exon", "Gene", "Promoter")
+  )
+  
+  g
+  
+ggsave("GSEA_DMRs_exp2.png", g, width = 25, height = 12.5, units = "cm")
+  
+```
+
+## Plot GSEAs together
+
+```{r GSEAs_combined}
+# combined data
+GSEA_exp1_data$exp <- "Acute"
+GSEA_exp1_data$setSize <- as.numeric(GSEA_exp1_data$setSize)
+str(GSEA_exp1_data)
+GSEA_exp2_data$exp <- "Primed"
+GSEA_exp2_data$setSize <- as.numeric(GSEA_exp2_data$setSize)
+GSEA_combined_data <- rbind(GSEA_exp1_data, GSEA_exp2_data)
+GSEA_combined_data$exp <- as.factor(GSEA_combined_data$exp)
+
+{
+  expanded <- GSEA_combined_data %>%
+    tidyr::unnest(c(Gene_IDs_list, MethDiff_list))
+  expanded$MethDiff_list <- as.numeric(expanded$MethDiff_list)
+  expanded <- expanded %>% distinct()
+  expanded$WrappedDescription <- str_wrap(expanded$Description, width = 20)
+}
+
+ # Plot
+  g <- ggplot(expanded, aes(
+    x = reorder(WrappedDescription, MethDiff_list),
+    y = MethDiff_list
+  )) +
+    geom_boxplot(
+      aes(group = interaction(WrappedDescription, ID)),
+      fill = "lightgrey",
+      #side = "l",
+      alpha = 1
+    ) +
+    geom_jitter(
+      aes(colour = region),
+      #side = "r",
+      alpha = 0.5,
+      size = 2.5,
+      #position = position_nudge(x = 0)
+      width = 0.1    
+      ) +
+    coord_flip() +
+    theme_classic() +
+    facet_wrap(~exp~GO, scales = "free",
+               labeller = as_labeller(
+                 c("biological_processes" = "Biological Processes",
+                   "molecular_function" = "Molecular Functions",
+                   "Acute" = "Acute",
+                   "Primed" = "Primed")
+               )
+    ) +
+
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+    labs(
+      y = "Methylation Difference (%)",
+      x = "Gene Ontology (GO)"# , fill = "region"
+    ) +
+
+  scale_color_manual(
+    name = "Region",
+    values = c("red", "#a1d61a","#0072B2", "#CC79A7"),
+    labels = c("Repeat", "Exon", "Gene", "Promoter")
+  )
+  
+  g # Plot is wrong, Primed experiment is coloured wrong, not worrying about this since I still need to semantically cluster names
+  
+# ggsave("GSEA_DMRs.png", g, width = 25, height = 25, units = "cm")
+
+```
+
+## making table of GSEA results:
+
+```{r GSEA_table}
+#remove unnecessary columns
+#GSEA_results_pruned <- subset(GSEA_combined_data[c(1,2,3,5,7,11,12,13,17,14)],)
+# Export GSEA results to get QUICKGO descriptions
+# write.csv(GSEA_results_pruned, "GSEA_combined_data.csv", row.names = FALSE)
+#read in new data
+# GSEA_results_pruned <- read.csv("GSEA_combined_data_named.csv", header = T, sep = ",")
+
+# rearrange to liking
+GSEA_results_organised <- subset(GSEA_combined_data[c(9,7,8,11,3,4,5)],)
+
+# Re-order by experiment first, then GO within experiment
+GSEA_results_organised <- GSEA_results_organised %>%
+  arrange(exp, GO, region, Description)
+
+GSEA_results_organised <- GSEA_results_organised %>%
+  mutate(
+    exp = case_when(
+      exp == "exp1" ~ "Acute",
+      exp == "exp2" ~ "Primed",
+      TRUE ~ exp
+    ),
+    GO = case_when(
+      GO == "biological_processes" ~ "Biological Process",
+      GO == "molecular_function" ~ "Molecular Function",
+      TRUE ~ GO
+    ),
+    region = case_when(
+      region == "dispersed_repeat" ~ "Repeats",
+      region == "exon" ~ "Exon",
+      region == "gene" ~ "Gene Body",
+      region == "promoter" ~ "Promoter",
+      TRUE ~ region
+    )
+  )
+
+# Making table
+# Find where the experiment changes (e.g., row index before second experiment starts)
+exp_change_row <- 16
+
+# Get row numbers where each region group ends
+region_breaks <- GSEA_results_organised %>%
+  mutate(row = row_number()) %>%
+  group_by(exp, GO, region) %>%
+  summarise(last_row = max(row), .groups = "drop") %>%
+  pull(last_row)
+
+
+set_flextable_defaults(background.color = "transparent")
+
+ft <- flextable(GSEA_results_organised) %>%
+  set_header_labels(
+    exp = "Experiment", 
+    GO = "Gene Ontology",
+    region = "Region",
+    Description2 = "Description",
+    setSize = "Set Size",
+    NES = "NES",
+    p.adjust = "P-adj"
+  ) %>%
+  theme_booktabs() %>%
+
+  # Slim down the column widths
+  width(j = "exp", width = 0.5) %>%
+  width(j = "GO", width = 1.2) %>%
+  width(j = "region", width = 1.2) %>%
+  width(j = "Description2", width = 1.5) %>%
+  width(j = "setSize", width = 0.4) %>%
+  width(j = "NES", width = 0.4) %>%
+  width(j = "p.adjust", width = 0.5) %>%
+
+  align(j = "Description2", align = "left", part = "all") %>%
+  align(j = c("setSize", "NES", "p.adjust"), align = "center", part = "all") %>%
+
+  merge_v(j = "exp") %>%
+  valign(j = "exp", valign = "top") %>%
+  merge_v(j = "region") %>%
+  valign(j = "region", valign = "top") %>%
+  merge_v(j = "GO") %>%
+  valign(j = "GO", valign = "top") %>%
+
+  hline(i = exp_change_row, border = fp_border(color = "black", width = 1)) %>%
+  border(i = 1, border.top = fp_border(color = "black", width = 1.5)) %>%
+  border(i = nrow(GSEA_results_organised), border.bottom = fp_border(color = "black", width = 1.5)) %>%
+
+  bg(i = seq(2, nrow(GSEA_results_organised), by = 2), bg = "#F7F7F7", part = "body") %>%
+
+  fontsize(part = "header", size = 8) %>%
+  fontsize(part = "body", size = 7) %>%
+  padding(part = "all", padding.top = 2, padding.bottom = 2, padding.left = 1, padding.right = 1) %>%
+
+  colformat_double(j = "NES", digits = 3) %>%
+  colformat_double(j = "p.adjust", digits = 3) %>%
+
+  set_caption(caption = "Table 3. GSEA results of the Acute and Primed responses to Diesel exposure.")
+
+
+ft
+
+doc <- read_docx()
+doc <- body_add_flextable(doc, value = ft, align = "left")
+print(doc, target = "GSEA_table.docx")
+
+```
+
+# Calculating and comparing proportions of genome aganist DMR features:
+
+```{r}
+
+exp1_DMRs <- read.csv("exp1_DMRs_refined.csv", header = T)
+exp1_DMRs <- subset(exp1_DMRs[exp1_DMRs$p_fdr <= 0.1,])
+
+exp1_DMRs$region[exp1_DMRs$region == "three_prime_UTR"] <- "3` UTR"
+
+
+exp2_DMRs <- read.table("exp2_DMRs.txt", header = T, sep = "\t")
+exp2_DMRs <- subset(exp2_DMRs[exp2_DMRs$p_fdr <= 0.1,])
+
+# If your columns are named differently, adjust these selections accordingly
+df_summary_exp1 <- exp1_DMRs %>%
+  group_by(region) %>%                # Adjust "feature" if your column has a different name
+  summarize(feature_count = n()) %>%   # Count how many rows per feature
+  mutate(proportion_percent = 100 * feature_count / sum(feature_count))
+
+# If your columns are named differently, adjust these selections accordingly
+df_summary_exp2 <- exp2_DMRs %>%
+  group_by(region) %>%                # Adjust "feature" if your column has a different name
+  summarize(feature_count = n()) %>%   # Count how many rows per feature
+  mutate(proportion_percent = 100 * feature_count / sum(feature_count))
+
+# View the summarized data
+print(df_summary_exp1)
+print(df_summary_exp2)
+
+# Construct the summary of the combined_annotations.gff3 file:
+combined_annotations_summary <- NULL
+
+combined_annotations_summary$region <- c("Repeat",
+                                         "Downstream",
+                                         "exon",
+                                         "5` UTR",
+                                         "Gene",
+                                          "ncRNA",
+                                          "Promoter",
+                                          "3` UTR")
+
+combined_annotations_summary$feature_count <- c(978221,
+                                                47671,
+                                                383432,
+                                                23401,
+                                                47671,
+                                                7980,
+                                                47671,
+                                                23356
+                                                )
+
+
+
+combined_annotations_summary$proportion_percent <- c(62.73,
+                                                     3.06,
+                                                     24.59,
+                                                     1.50,
+                                                     3.06,
+                                                     0.51,
+                                                     3.06,
+                                                     1.50
+                                                     )
+
+combined_annotations_summary <- as.data.frame(combined_annotations_summary)
+
+library(ggplot2)
+
+# Sort from largest to smallest so that
+# the largest portion is drawn first (on the bottom of the bar).
+# df_summary <- df_summary %>%
+#   arrange(proportion_percent)
+# 
+# # Turn 'region' into a factor with levels in descending order
+# df_summary$region <- factor(df_summary$region, levels = df_summary$region)
+# 
+# # Bar plot by proportion
+# ggplot(df_summary, aes(x = region, y = proportion_percent, fill = region)) +
+#   geom_bar(stat = "identity") +
+#   labs(title = "Bar Plot of Feature Proportions",
+#        x = "Feature",
+#        y = "Proportion (%)") +
+#   theme_bw()
+# 
+# 
+# # Sort from largest to smallest so that
+# # the largest portion is drawn first (on the bottom of the bar).
+# combined_annotations_summary <- combined_annotations_summary %>%
+#   arrange(proportion_percent)
+# 
+# # Turn 'region' into a factor with levels in descending order
+# combined_annotations_summary$region <- factor(combined_annotations_summary$region, levels = combined_annotations_summary$region)
+# 
+# # Bar plot by proportion
+# ggplot(combined_annotations_summary, aes(x = region, y = proportion_percent, fill = region)) +
+#   geom_bar(stat = "identity") +
+#   labs(
+#     title = "Bar Plot of Feature Proportions",
+#     x = "Feature",
+#     y = "Proportion (%)"
+#   ) +
+#   theme_bw() +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+#   )
+
+
+
+df_summary_exp1$type <- "DMRs - Acute"
+df_summary_exp2$type <- "DMRs - Primed"
+combined_annotations_summary$type <- "Annotated Genome"
+
+all_data <- rbind(df_summary_exp1, df_summary_exp2, combined_annotations_summary)
+
+all_data <- all_data %>%
+  arrange(proportion_percent)
+
+all_data$region <- as.factor(all_data$region)
+
+# rename values to be correct
+all_data$region[all_data$region == "dispersed_repeat"] <- "Repeat"
+all_data$region[all_data$region == "promoter"] <- "Promoter"
+
+# Set the order of feature_type as a factor
+all_data$region <- factor(all_data$region, levels = c("Repeat", 
+                                                                  "exon",
+                                                                  "Promoter",
+                                                                  "Gene",
+                                                                  "Downstream",
+                                                                  "3` UTR",
+                                                                  "5` UTR",
+                                                                  "ncRNA"))
+
+
+
+rel_plot <- ggplot(all_data, aes(x = region, y = proportion_percent, fill = region)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = feature_count), vjust = -0.5, color = "black", angle = 45, hjust = 0)+
+  labs(
+    x = "Feature",
+    y = "Proportion (%)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  ) + 
+  facet_wrap(~type, nrow = 1, scales = "free_x") +
+    scale_fill_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73", "#a1d61a", "#0072B2", "#D55E00", "#CC79A7", "red"),
+    labels = c("Repeat", "Downstream", "Exon", "5' UTR", "Gene","ncRNA", "Promoter", "3' UTR")) 
+
+rel_plot
+
+ggsave("./rel_plot.png", rel_plot, width = 30, height = 20, units= "cm", dpi = 600)
+
+
+abs_plot <- ggplot(all_data, aes(x = region, y = feature_count, fill = region)) +
+  geom_bar(stat = "identity") +
+  labs(
+    x = "Feature",
+    y = "Count of Features"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  ) + 
+  facet_wrap(~type, nrow = 1, scales = "free")
+
+
+
+grid.arrange(abs_plot, rel_plot, nrow = 2)
+
+install.packages("gtable")
+library(gtable)
+
+g1 <- ggplotGrob(abs_plot)
+g2 <- ggplotGrob(rel_plot)
+g <- rbind(g1, g2, size = "first")
+g$widths <- unit.pmax(g1$widths, g2$widths)
+grid.newpage()
+grid.draw(g)
+
+
+```
+
+# Making a new figure with the uniprot matched GO ids and descriptions of DMRs
+
+```{r}
+data <- read.table("DMR functional terms table.txt", header = T, sep = "\t")
+
+data <- data[ !apply(data =="", 1, any),]
+
+data <- data %>%
+  arrange(Methylation.Difference....)
+
+data$Methylation.Difference.... <- as.numeric(data$Methylation.Difference....)
+data$GO <- as.factor(data$GO)
+data$GO.Type <- as.factor(data$GO.Type)
+data$Feature.type <- as.factor(data$Feature.type)
+data$Experiment <- as.factor(data$Experiment)
+data$Cytosine.Context <- as.factor(data$Cytosine.Context)
+data$Enriched <- as.factor(data$Enriched)
+
+data$Wrapped_GO <- str_wrap(data$GO, width = 30)  # Adjust the width as needed
+
+
+cols <- c("#e08282", "#f5e9e9")
+cols2 <- c("red2", "#4d4949")
+
+ggplot(
+  data = data,
+  aes(
+    x = Methylation.Difference....,
+    y = reorder(Wrapped_GO, Methylation.Difference....),
+    color = Enriched,
+    fill = Enriched
+  )
+) +
+  geom_boxplot(alpha = 0.5) +
+  facet_wrap(~Experiment + GO.Type, scales = "free") +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Gene Ontology (GO)",
+    fill = "Gene Ontology",
+    color = "Gene Ontology",
+    size = "Adjusted P-Value"
+  ) +
+  theme_bw() +
+  scale_fill_manual(values = cols) +
+  scale_colour_manual(values = cols2)
+
+ggsave("ORA_DMRs.png",width = 25, height = 30, dpi = 300, units = "cm")
+
+# Need to change the descriptions of the functionlly enriched terms so that I can highlight them on plot;
+ORA_results_combined
+
+write.table(ORA_results_combined, "ORA_results_combined_TO_BE_RENAMED.txt", sep = '\t')
+
+ORA_results_combined_RENAMED <- read.table("ORA_results_combined_RENAMED.txt", sep = '\t', header = T)
+
+
+
+# -----------------------------------------------------------------------------
+
+# Making a plot of just the acute exposure expeirment
+# including the ggside splits to show the number of parts associated to each function
+
+data_acute <- data[data$Experiment == "Acute",]
+data_acute$Feature.type <- as.character(data_acute$Feature.type)
+str(data_acute)
+data_primed <- data[data$Experiment == "Primed",]
+
+# Change colour parameters here:
+cols <- c("#e08282", "#f5e9e9")
+cols2 <- c("red2", "#4d4949")
+
+library(ggside)
+library(gghalves)
+
+# Acute plot
+acute_fe_plot <- ggplot(
+  data = data_acute,
+  aes(
+    x = Methylation.Difference....,
+    y = reorder(Wrapped_GO, Methylation.Difference....),
+    color = Enriched,
+    fill = Enriched
+  )
+) +
+  geom_boxplot(alpha = 0.5) +
+  facet_wrap(~GO.Type, scales = "free",
+             labeller = as_labeller(
+               c(
+                 "BP" = "Biological Processes",
+                 "MF" = "Molecular Functions")
+                )
+             ) +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Gene Ontology (GO)",
+    fill = "Overrepresentation",
+    color = "Overrepresentation",
+    size = "Adjusted P-Value"
+  ) +
+  theme_bw() +
+  scale_fill_manual(values = cols) +
+  scale_colour_manual(values = cols2)
+
+acute_fe_plot
+
+ggsave("./acute_fe_plot.png", acute_fe_plot, width = 2, height = 16, units= "cm", dpi = 600)
+
+# Primed plot
+primed_fe_plot <- ggplot(
+  data = data_primed,
+  aes(
+    x = Methylation.Difference....,
+    y = reorder(Wrapped_GO, Methylation.Difference....),
+    color = Enriched,
+    fill = Enriched
+  )
+) +
+  geom_boxplot(alpha = 0.5) +
+  facet_wrap(~GO.Type, 
+             scales = "free",
+             labeller = as_labeller(
+               c(
+                 "BP" = "Biological Processes",
+                 "MF" = "Molecular Functions")
+                )
+             ) +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Gene Ontology (GO)",
+    fill = "Overrepresentation",
+    color = "Overrepresentation",
+    size = "Adjusted P-Value"
+  ) +
+  theme_bw() +
+  scale_fill_manual(values = cols) +
+  scale_colour_manual(values = cols2)
+
+primed_fe_plot
+
+ggsave("./primed_fe_plot.png", primed_fe_plot, width = 24, height = 16, units= "cm", dpi = 600)
+
+getwd()
+```
+
+# Correlating Expression and Methylation
+
+```{r}
+
+# Importing data file which already has expression and methylation combined from using the 'VLOOKUP' function in excel, I used the full DMR results for both experiments, alongside the full DEA results for both experiments, homogenised the naming conventions (removing .TU, and replacing .path with .mrna).
+
+
+getwd()
+
+meth_exp_data <- read.table("Corelating Methylation and Expression All context data.txt", header = T, sep = '\t')
+
+str(meth_exp_data)
+
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "dispersed_repeat", "Repeat", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "downstream_region", "Downstream", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "exon", "Exon", region))        
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "five_prime_UTR", "5` UTR", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "ncRNA_gene", "ncRNA", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "promoter", "Promoter", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "three_prime_UTR", "3` UTR", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(region = ifelse(region == "gene", "Gene", region))
+meth_exp_data <- meth_exp_data %>%
+  mutate(experiment = ifelse(experiment == "exp1", "Acute Experiment", experiment))
+meth_exp_data <- meth_exp_data %>%
+  mutate(experiment = ifelse(experiment == "exp2", "Primed Experiment", experiment))
+
+
+meth_exp_data$experiment <- as.factor(meth_exp_data$experiment)
+meth_exp_data$context <- as.factor(meth_exp_data$context)
+meth_exp_data$region <- as.factor(meth_exp_data$region)
+
+
+library(ggplot2)
+
+ggplot(meth_exp_data, 
+       aes(x = meth.diff,
+           y = exp_l2fc,
+           col = region
+           )) + 
+  geom_point(alpha = 0.5, size = 3) + 
+  geom_smooth(method = "lm", se = F, color = "black", lwd = 2) +
+  geom_vline(xintercept = c(0), col = "black", linetype = "dashed") +
+  geom_hline(yintercept = c(0), col = "black", linetype = "dashed") +
+  scale_color_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73", "#a1d61a", "#0072B2", "#D55E00", "#CC79A7", "red"),
+    labels = c("Repeat", "Downstream", "Exon", "5' UTR", "Gene","ncRNA", "Promoter", "3' UTR")) +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Expression Change (Log2FoldChange)",
+    color = "Region Type"
+  ) +
+  theme_bw() + 
+  scale_x_continuous(limits = c(-40, 40), breaks = c(-40,-20,0,20,40)) + 
+  scale_y_continuous(limits = c(-5, 5), breaks = c(-5,-4,-3, -2, -1, 0, 1, 2, 3,4,5)) + 
+  facet_grid(~experiment~region)
+
+# -----------------------------------------------------------------------------
+
+# Making a nice set of plots
+
+levels(meth_exp_data$region)
+# reorder regions
+meth_exp_data$region <- factor(
+  meth_exp_data$region,
+  levels = c("Repeat", "Downstream", "Exon", "5` UTR",
+             "Gene", "ncRNA", "Promoter", "3` UTR")  # <- Your desired order
+)
+
+exp1_corr_plot <- ggplot(meth_exp_data[(meth_exp_data$experiment == "Acute Experiment") #& (meth_exp_data$meth_p_fdr <= 0.1)
+                                       ,], 
+       aes(x = meth.diff,
+           y = exp_l2fc,
+           col = region
+           )) + 
+  geom_point(alpha = 0.5, size = 2, aes(shape = context)) + 
+  geom_smooth(method = "lm", se = F, color = "black", lwd = 1) +
+  geom_vline(xintercept = c(0), col = "black", linetype = "dashed") +
+  geom_hline(yintercept = c(0), col = "black", linetype = "dashed") +
+  scale_color_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73", "#a1d61a", "#0072B2", "#D55E00", "#CC79A7", "red"),
+    labels = c("Repeat", "Downstream", "Exon", "5' UTR", "Gene","ncRNA", "Promoter", "3' UTR")) +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Expression Change (Log2FoldChange)",
+    color = "Region Type"
+  ) +
+  theme_bw() + 
+  #scale_x_continuous(limits = c(-40, 40), breaks = c(-40,-20,0,20,40)) + 
+  scale_y_continuous(limits = c(-5, 5), breaks = c(-5,-4,-3, -2, -1, 0, 1, 2, 3,4,5)) + 
+  facet_wrap(~region, nrow = 2, scales = "free")  + 
+  guides(color = "none")
+
+print(exp1_corr_plot)
+
+ggsave("exp1_meth-expression_plot.png", exp1_corr_plot, width = 18, height = 10, units = "cm")
+
+# Create an empty results dataframe
+corr_results_exp1 <- data.frame(
+  region = character(),
+  correlation = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+meth_exp_data_exp1 <- meth_exp_data[meth_exp_data$experiment == "Acute Experiment",]
+
+# Loop through each level of "region"
+for (reg in levels(meth_exp_data_exp1$region)) {
+  
+  # Subset the data for this region
+  region_data <- subset(meth_exp_data_exp1, region == reg)
+  
+  # Perform correlation test
+  test <- cor.test(region_data$meth.diff, region_data$exp_l2fc)
+  
+  # Add the result to the results dataframe
+  corr_results_exp1 <- rbind(corr_results_exp1, data.frame(
+    region = reg,
+    correlation = test$estimate,
+    p_value = test$p.value
+  ))
+}
+
+
+exp2_corr_plot <- ggplot(meth_exp_data[(meth_exp_data$experiment == "Primed Experiment") # & (meth_exp_data$meth_p_fdr <= 0.1) # also an option to look at only the significantly differentiall expressed regions.
+                                       ,], 
+       aes(x = meth.diff,
+           y = exp_l2fc,
+           col = region
+           )) + 
+  geom_point(alpha = 0.5, size = 2, aes(shape = context)) + 
+  geom_smooth(method = "lm", se = F, color = "black", lwd = 1) +
+  geom_vline(xintercept = c(0), col = "black", linetype = "dashed") +
+  geom_hline(yintercept = c(0), col = "black", linetype = "dashed") +
+  scale_color_manual(
+    name = "Region",
+    values = c("#E69F00", "#56B4E9", "#009E73", "#a1d61a", "#0072B2", "#D55E00", "#CC79A7", "red"),
+    labels = c("Repeat", "Downstream", "Exon", "5' UTR", "Gene","ncRNA", "Promoter", "3' UTR")) +
+  labs(
+    x = "Methylation Difference (%)",
+    y = "Expression Change (Log2FoldChange)",
+    color = "Region Type"
+  ) +
+  theme_bw() + 
+  #scale_x_continuous(limits = c(-40, 40), breaks = c(-40,-20,0,20,40)) + 
+  scale_y_continuous(limits = c(-5, 5), breaks = c(-5,-4,-3, -2, -1, 0, 1, 2, 3,4,5)) + 
+  facet_wrap(~region, nrow = 2, scales = "free")  + 
+  guides(color = "none")
+
+print(exp2_corr_plot)
+
+ggsave("exp2_meth-expression_plot.png", exp2_corr_plot, width = 18, height = 10, units = "cm")
+
+
+# Create an empty results dataframe
+corr_results_exp2 <- data.frame(
+  region = character(),
+  correlation = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+meth_exp_data_exp2<- meth_exp_data[meth_exp_data$experiment == "Primed Experiment",]
+
+corr_results_exp2 <- NULL
+
+# Loop through each level of "region"
+for (reg in levels(meth_exp_data_exp2$region)) {
+  
+  # Subset the data for this region
+  region_data <- subset(meth_exp_data_exp2, region == reg)
+  
+  # Perform correlation test
+  test <- cor.test(region_data$meth.diff, region_data$exp_l2fc)
+  
+  # Add the result to the results dataframe
+  corr_results_exp2 <- rbind(corr_results_exp2, data.frame(
+    region = reg,
+    correlation = test$estimate,
+    p_value = test$p.value
+  ))
+}
+
+
+# -------------------------------------------------------------------------------
+
+exp1_meth_exp_data <- meth_exp_data[meth_exp_data$experiment == "Acute Experiment",]
+exp1_corr_results <- cor.test(exp1_meth_exp_data$meth.diff, 
+                              exp1_meth_exp_data$exp.l2fc, 
+                              method = "pearson")
+
+print(exp1_corr_results)
+  # p = 0.003123
+  # correlation = -0.03447973 
+
+summary(exp1_meth_exp_data)
+
+exp2_meth_exp_data <- meth_exp_data[meth_exp_data$experiment == "Primed Experiment",]
+exp2_corr_results <- cor.test(exp2_meth_exp_data$meth.diff, 
+                              exp2_meth_exp_data$l2fc, 
+                              method = "pearson")
+
+print(exp2_corr_results)
+  # p = 0.7574
+  # correlation = -0.003096255 
+
+summary(exp2_meth_exp_data)
+
+
+lm <- lm(data = meth_exp_data,
+         l2fc~meth.diff)
+summary(lm)
+anova(lm)
+
+lm_exp1 <- lm(data = meth_exp_data[meth_exp_data$experiment == "Acute Experiment",],
+         l2fc~meth.diff+region)
+summary(lm_exp1)
+anova(lm_exp1)
+
+lm_exp2 <- lm(data = meth_exp_data[meth_exp_data$experiment == "Primed Experiment",],
+         l2fc~meth.diff+region)
+summary(lm_exp2)
+anova(lm_exp2)
+
+
+```
+
+
+
+```{r}
+
+
+```
