@@ -1,0 +1,7 @@
+"experiment","context","n_pairs","statistic","p","method","p.adj"
+"exp1","CHG",4,6,0.855132140584706,"Wilcoxon signed-rank test",0.855132140584706
+"exp1","CHH",4,6,0.855132140584706,"Wilcoxon signed-rank test",0.855132140584706
+"exp1","CpG",4,4,0.855132140584706,"Wilcoxon signed-rank test",0.855132140584706
+"exp2","CHG",5,2,0.177529852412153,"Wilcoxon signed-rank test",0.355059704824307
+"exp2","CHH",5,2,0.177529852412153,"Wilcoxon signed-rank test",0.355059704824307
+"exp2","CpG",5,2,0.177529852412153,"Wilcoxon signed-rank test",0.355059704824307

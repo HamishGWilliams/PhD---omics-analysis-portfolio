@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Download page for LIMS26901 Sample_3-3_D (Raw)</title>
+    <style>
+      body {
+      font-family: Arial, Helvetica, sans-serif;
+      }
+      p {
+      max-width: 800px
+      }
+      .highlight {
+      color: #031F73;
+      font-variant: small-caps;
+      }
+      table.stripy tr:nth-child(odd) {
+      background-color: #ccccff;
+      }
+      table.stripy tr:nth-child(even) {
+      background-color: #eeeeee;
+      }
+    </style>        
+  </head>
+  <body>
+    <div id="header" class="highlight">
+      <a HREF="https://www.liv.ac.uk/genomic-research/">
+	<img src="https://cgr.liv.ac.uk/454/images/UoL_logo.png" border="0" width="433px" 
+	     height="65px">
+      </a>
+      <h1>Download page for LIMS26901 Sample_3-3_D (Raw)</h1>
+    </div>
+    <table class="stripy" pad>
+      <tr>
+	
+	  <th>File</th>
+	
+	  <th>Number of Reads</th>
+	
+	  <th>Maximum Read Length (bp.)</th>
+	
+	  <th>Mean Read Length (bp.)</th>
+	
+	  <th>Read Length Standard Deviation (bp.)</th>
+	
+	  <th>Minimum Base Quality Score</th>
+	
+	  <th>Maximum Base Quality Score</th>
+	
+	  <th>Mean Base Quality Score</th>
+	
+	  <th>Base Quality Score Standard Deviation</th>
+	
+	  <th>A content (%)</th>
+	
+	  <th>C content (%)</th>
+	
+	  <th>G content (%)</th>
+	
+	  <th>T content (%)</th>
+	
+	  <th>N content (%)</th>
+	
+      </tr>
+      
+	<tr>
+	  <td>3-3_D_TCTAGGAGAT-AGGTCACTGT_L001_R1_001.fastq.gz</td>
+	  
+	    <td>21190190</td>
+	  
+	    <td>151</td>
+	  
+	    <td>151.0</td>
+	  
+	    <td>0.0</td>
+	  
+	    <td>2</td>
+	  
+	    <td>37</td>
+	  
+	    <td>35.9</td>
+	  
+	    <td>4.4</td>
+	  
+	    <td>31.7</td>
+	  
+	    <td>0.3</td>
+	  
+	    <td>18.7</td>
+	  
+	    <td>49.4</td>
+	  
+	    <td>0.0</td>
+	  
+	</tr>
+      
+	<tr>
+	  <td>3-3_D_TCTAGGAGAT-AGGTCACTGT_L001_R2_001.fastq.gz</td>
+	  
+	    <td>21190190</td>
+	  
+	    <td>151</td>
+	  
+	    <td>151.0</td>
+	  
+	    <td>0.0</td>
+	  
+	    <td>2</td>
+	  
+	    <td>37</td>
+	  
+	    <td>35.6</td>
+	  
+	    <td>5.1</td>
+	  
+	    <td>49.7</td>
+	  
+	    <td>18.7</td>
+	  
+	    <td>0.3</td>
+	  
+	    <td>31.2</td>
+	  
+	    <td>0.0</td>
+	  
+	</tr>
+      
+    </table>
+    <p>
+    Please note that we do not routinely provide access to the untrimmed sequence files, since we recommend that the trimmed data are used for most downstream analyses. Please <a href='mailto:R.Gregory@liverpool.ac.uk?cc=cgr@liv.ac.uk&subject=LIMS26901 untrimmed data request'>contact us</a> if you would like us to enable access to the untrimmed data (although we may take some convincing...)
+    </p>
+  </body>
+</html>
