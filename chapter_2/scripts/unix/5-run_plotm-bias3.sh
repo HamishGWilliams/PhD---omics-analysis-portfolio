@@ -1,64 +1,177 @@
 #!/bin/bash
-#SBATCH --mem 6G
+#SBATCH --job-name=plot_mbias
+#SBATCH --mem=6G
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=h.williams.22@abdn.ac.uk
-#SBATCH --output=/uoa/home/r02hw22/sharedscratch/Methylation_Analyses/Methylation_Analyses_Anemones/slurm_outputs
-#SBATCH --error=/uoa/home/r02hw22/sharedscratch/Methylation_Analyses/Methylation_Analyses_Anemones/slurm_errors/%x_%j.err
-
 #SBATCH --time=1-00:00:00
-
-# sbatch /uoa/home/r02hw22/Equina_Methylation_Analysis/Scripts/run_plotm-bias3.sh
-
-cd /uoa/home/r02hw22/Equina_Methylation_Analysis/Data2/Trimmed/Sample_3-3_D
-
-awk '{f="file" NR; print $0 > f}' RS='================'  *.M-bias.txt
-#creates 7 files, first is not needed. others need only lines 2-152
+#SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
+#SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
 
 module load r/4.2.2
 
-R
-#install.packages("ggplot2", repos = "https://cloud.r-project.org")
-library(ggplot2)
+EXTRACT_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/data/processed/methylation_extraction"
+PLOT_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/results/figures/m_bias"
 
-#setwd("/uoa/home/s02df9/equina_meth_analysis/'NEOF Methyl seq'/Trimmed/Sample_3-3_D")
-#due to spaces in the column names skip those and add later
-r1_cpg = read.table("file2", header = F, skip = 2, nrows = 151)
-r1_chg = read.table("file3", header = F, skip = 2, nrows = 151)
-r1_chh = read.table("file4", header = F, skip = 2, nrows = 151)
+mkdir -p "$PLOT_DIR"
 
-r2_cpg = read.table("file5", header = F, skip = 2, nrows = 151)
-r2_chg = read.table("file6", header = F, skip = 2, nrows = 151)
-r2_chh = read.table("file7", header = F, skip = 2, nrows = 151)
+shopt -s nullglob
 
-all_r1 = rbind(r1_cpg, r1_chg, r1_chh)
+for sample_dir in "$EXTRACT_DIR"/*/ ; do
+    sample=$(basename "$sample_dir")
 
-all_r2 = rbind(r2_cpg, r2_chg, r2_chh)
+    echo "Processing M-bias plots for sample: $sample"
+    echo "Input directory: $sample_dir"
 
-colnames(all_r1) = c("position", "meth", "un", "pc_meth", "coverage")
-colnames(all_r2) = c("position", "meth", "un", "pc_meth", "coverage")
+    mbias_files=("$sample_dir"/*.M-bias.txt)
 
-all_r1$context = rep(c("cpg", "chg", "chh"), each = nrow(r1_cpg))
-all_r1$read = "1"
+    if [ "${#mbias_files[@]}" -eq 0 ]; then
+        echo "No M-bias file found for sample: $sample; skipping."
+        echo
+        continue
+    fi
 
-all_r2$context = rep(c("cpg", "chg", "chh"), each = nrow(r2_cpg))
-all_r2$read = "2"
-all_data = rbind(all_r1, all_r2)
+    for mbias_file in "${mbias_files[@]}" ; do
+        mbias_base=$(basename "$mbias_file" .M-bias.txt)
+        sample_plot_dir="$PLOT_DIR/$sample"
+        tmp_dir="$sample_dir/m_bias_split_tmp"
 
+        mkdir -p "$sample_plot_dir"
+        rm -rf "$tmp_dir"
+        mkdir -p "$tmp_dir"
 
-read_meth_pc = ggplot(all_data, aes(x = position,
-                                 y = pc_meth,
-                                group = context,
-                                col = context)) +
-  geom_line() +
+        echo "Splitting M-bias file: $mbias_file"
+
+        awk -v out="$tmp_dir/file" '
+            BEGIN { RS="================"; ORS="" }
+            {
+                f = out NR
+                print $0 > f
+                close(f)
+            }
+        ' "$mbias_file"
+
+        echo "Generating plot for: $sample"
+
+        Rscript --vanilla - "$tmp_dir" "$sample" "$mbias_base" "$sample_plot_dir" <<'RSCRIPT'
+args <- commandArgs(trailingOnly = TRUE)
+
+tmp_dir <- args[1]
+sample <- args[2]
+mbias_base <- args[3]
+sample_plot_dir <- args[4]
+
+suppressPackageStartupMessages(library(ggplot2))
+
+read_mbias_section <- function(file, context, read) {
+  if (!file.exists(file)) {
+    warning("Missing expected M-bias section file: ", file)
+    return(NULL)
+  }
+
+  dat <- tryCatch(
+    read.table(
+      file,
+      header = FALSE,
+      skip = 2,
+      fill = TRUE,
+      stringsAsFactors = FALSE
+    ),
+    error = function(e) {
+      warning("Could not read section file: ", file)
+      return(NULL)
+    }
+  )
+
+  if (is.null(dat) || nrow(dat) == 0 || ncol(dat) < 5) {
+    warning("Section file was empty or malformed: ", file)
+    return(NULL)
+  }
+
+  dat <- dat[, 1:5]
+  colnames(dat) <- c("position", "meth", "un", "pc_meth", "coverage")
+
+  dat$position <- suppressWarnings(as.numeric(dat$position))
+  dat$meth <- suppressWarnings(as.numeric(dat$meth))
+  dat$un <- suppressWarnings(as.numeric(dat$un))
+  dat$pc_meth <- suppressWarnings(as.numeric(dat$pc_meth))
+  dat$coverage <- suppressWarnings(as.numeric(dat$coverage))
+
+  dat <- dat[!is.na(dat$position), ]
+
+  if (nrow(dat) == 0) {
+    warning("No numeric position rows found in section file: ", file)
+    return(NULL)
+  }
+
+  dat$context <- context
+  dat$read <- read
+
+  dat
+}
+
+sections <- list(
+  read_mbias_section(file.path(tmp_dir, "file2"), "CpG", "Read 1"),
+  read_mbias_section(file.path(tmp_dir, "file3"), "CHG", "Read 1"),
+  read_mbias_section(file.path(tmp_dir, "file4"), "CHH", "Read 1"),
+  read_mbias_section(file.path(tmp_dir, "file5"), "CpG", "Read 2"),
+  read_mbias_section(file.path(tmp_dir, "file6"), "CHG", "Read 2"),
+  read_mbias_section(file.path(tmp_dir, "file7"), "CHH", "Read 2")
+)
+
+all_data <- do.call(rbind, sections[!vapply(sections, is.null, logical(1))])
+
+if (is.null(all_data) || nrow(all_data) == 0) {
+  stop("No usable M-bias data found for sample: ", sample)
+}
+
+all_data$context <- factor(all_data$context, levels = c("CpG", "CHG", "CHH"))
+all_data$read <- factor(all_data$read, levels = c("Read 1", "Read 2"))
+
+read_meth_pc <- ggplot(
+  all_data,
+  aes(
+    x = position,
+    y = pc_meth,
+    group = context,
+    colour = context
+  )
+) +
+  geom_line(linewidth = 0.4) +
   theme_classic() +
-  ylab("Percentage methylated") +
+  labs(
+    title = paste("M-bias methylation profile:", sample),
+    x = "Position in read",
+    y = "Percentage methylated",
+    colour = "Context"
+  ) +
   facet_wrap(~read, ncol = 1)
 
-png(file = "pecent methylated by position per read 3 - pre_mbias.png")
-read_meth_pc
+out_png <- file.path(
+  sample_plot_dir,
+  paste0(mbias_base, "_m_bias_percent_methylated_by_position.png")
+)
+
+png(
+  filename = out_png,
+  width = 8,
+  height = 6,
+  units = "in",
+  res = 300
+)
+
+print(read_meth_pc)
 dev.off()
-quit(save = "no")
 
+message("Saved plot: ", out_png)
+RSCRIPT
 
+        rm -rf "$tmp_dir"
+
+        echo "Finished plot for: $sample"
+        echo
+    done
+done
+
+echo "All M-bias plots complete."

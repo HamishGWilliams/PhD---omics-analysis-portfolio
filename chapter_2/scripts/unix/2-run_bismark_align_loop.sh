@@ -1,25 +1,36 @@
 #!/bin/bash
-#SBATCH --mem 96G
-#SBATCH --partition uoa-compute
+#SBATCH --mem 16G
 #SBATCH -N 1
-#SBATCH -n 8
+#SBATCH -n 1
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=h.williams.22@abdn.ac.uk
-#SBATCH --time=4-00:00:00
-#SBATCH --output=/uoa/home/r02hw22/sharedscratch/Methylation_Analyses/Methylation_Analyses_Anemones/slurm_outputs
-#SBATCH --error=/uoa/home/r02hw22/sharedscratch/Methylation_Analyses/Methylation_Analyses_Anemones/slurm_errors/%x_%j.err
+#SBATCH --mail-user=r02hw22@abdn.ac.uk
+#SBATCH --time=1-00:00:00
+#SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
+#SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
 
-# sbatch /uoa/home/r02hw22/Equina_Methylation_Analysis/Scripts/run_bismark_align_loop.sh
+module load bowtie2/2.4.2
+module load bismark/0.23.0
 
-module load  bowtie2/2.4.2
-module load  bismark/0.23.0
+TRIMMED_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/data/trimmed"
+GENOME_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/data/genome_index"
+OUT_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/data/processed/bam"
 
-# Change Directory (abosulte path) to folder with sub-directories of data:
+mkdir -p "$OUT_DIR"
 
-cd /uoa/home/r02hw22/Equina_Methylation_Analysis/Data2/Trimmed
+cd "$TRIMMED_DIR"
 
 for d in ./*/ ; do
-        (cd "$d" && bismark --multicore 8 /uoa/home/r02hw22/Equina_Methylation_Analysis/Data2   -1 *_R1_001.fastq.gz -2  *_R2_001.fastq.gz ) ;
-                    done
+    sample=$(basename "$d")
+    mkdir -p "$OUT_DIR/$sample"
 
+    (
+        cd "$d" && \
+        bismark \
+            --multicore 8 \
+            --genome "$GENOME_DIR" \
+            --output_dir "$OUT_DIR/$sample" \
+            -1 *_R1_001.fastq.gz \
+            -2 *_R2_001.fastq.gz
+    )
+done
 
