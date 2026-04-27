@@ -66,3 +66,9 @@ org.Aequina.eg.db/inst/extdata/
 *.sam
 *.bam
 *.out
+
+# chapter_1 large file directories
+chapter_1/data/external
+chapter_1/data/trimmed
+chapter_1/data/processed/bam
+chapter_1/data/processed/index
