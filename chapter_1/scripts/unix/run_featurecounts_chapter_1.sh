@@ -20,10 +20,12 @@ set -euo pipefail
 # Expected repository layout:
 #   chapter_1/
 #     data/
-#       processed/              # input BAM files, or processed/bam/
-#       external/                # annotation files, e.g. A_Equina.gtf
+#       processed/
+#         *.bam                  # input BAM files, or processed/bam/*.bam
+#         extracts/              # exon annotation/extract file for featureCounts
+#       processed/bam/           # optional preferred BAM input folder
 #     results/
-#       tables/                  # featureCounts output table
+#       tables/featurecounts/    # featureCounts output table
 #     logs/
 #       outputs/                 # SLURM stdout logs
 #       errors/                  # SLURM stderr logs
@@ -31,7 +33,7 @@ set -euo pipefail
 #       unix/
 #         run_featurecounts_chapter_1.sh
 #
-# Submit from the script directory or from the repository root using:
+# Submit from the repository root using:
 #   sbatch chapter_1/scripts/unix/run_featurecounts_chapter_1.sh
 # -----------------------------------------------------------------------------
 
@@ -55,7 +57,14 @@ else
     BAM_DIR="$CHAPTER_DIR/data/processed"
 fi
 
-ANNOTATION="$CHAPTER_DIR/data/external/A_Equina.gtf"
+# Exon annotation / extract directory used by featureCounts.
+EXTRACTS_DIR="$CHAPTER_DIR/data/processed/extracts"
+
+# Optional: set ANNOTATION_BASENAME if the extracts directory contains more than
+# one possible annotation file.
+# Example:
+#   ANNOTATION_BASENAME="A_Equina_exons.saf"
+ANNOTATION_BASENAME=""
 
 # Output locations.
 OUT_DIR="$CHAPTER_DIR/results/tables/featurecounts"
@@ -68,7 +77,7 @@ mkdir -p "$OUT_DIR" "$LOG_OUTPUT_DIR" "$LOG_ERROR_DIR"
 printf 'Repository root: %s\n' "$REPO_ROOT"
 printf 'Chapter directory: %s\n' "$CHAPTER_DIR"
 printf 'BAM directory: %s\n' "$BAM_DIR"
-printf 'Annotation file: %s\n' "$ANNOTATION"
+printf 'Extracts directory: %s\n' "$EXTRACTS_DIR"
 printf 'Output file: %s\n\n' "$OUT_FILE"
 
 # Check required inputs.
@@ -77,11 +86,65 @@ if [[ ! -d "$BAM_DIR" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$ANNOTATION" ]]; then
-    printf 'ERROR: Annotation file not found: %s\n' "$ANNOTATION" >&2
-    printf 'Place A_Equina.gtf in chapter_1/data/external/ or update ANNOTATION in this script.\n' >&2
+if [[ ! -d "$EXTRACTS_DIR" ]]; then
+    printf 'ERROR: Exon extracts directory does not exist: %s\n' "$EXTRACTS_DIR" >&2
     exit 1
 fi
+
+# Find the featureCounts annotation/extract file.
+# Supported:
+#   .gtf / .gff / .gff3 : featureCounts default GTF/GFF mode
+#   .saf                : featureCounts SAF mode using -F SAF
+if [[ -n "$ANNOTATION_BASENAME" ]]; then
+    ANNOTATION="$EXTRACTS_DIR/$ANNOTATION_BASENAME"
+    if [[ ! -f "$ANNOTATION" ]]; then
+        printf 'ERROR: ANNOTATION_BASENAME was set but file was not found: %s\n' "$ANNOTATION" >&2
+        exit 1
+    fi
+else
+    mapfile -t ANNOTATION_FILES < <(
+        find "$EXTRACTS_DIR" -maxdepth 1 -type f \
+            \( -name "*.gtf" -o -name "*.gff" -o -name "*.gff3" -o -name "*.saf" \) \
+            | sort
+    )
+
+    if [[ "${#ANNOTATION_FILES[@]}" -eq 0 ]]; then
+        printf 'ERROR: No .gtf, .gff, .gff3, or .saf annotation/extract file found in %s\n' "$EXTRACTS_DIR" >&2
+        exit 1
+    fi
+
+    if [[ "${#ANNOTATION_FILES[@]}" -gt 1 ]]; then
+        printf 'ERROR: More than one possible annotation/extract file found in %s\n' "$EXTRACTS_DIR" >&2
+        printf 'Set ANNOTATION_BASENAME in this script to choose one. Candidates:\n' >&2
+        printf '  %s\n' "${ANNOTATION_FILES[@]}" >&2
+        exit 1
+    fi
+
+    ANNOTATION="${ANNOTATION_FILES[0]}"
+fi
+
+# Determine annotation format.
+ANNOTATION_FORMAT_ARGS=()
+case "$ANNOTATION" in
+    *.saf)
+        ANNOTATION_FORMAT_ARGS=(-F SAF)
+        ;;
+    *.gtf|*.gff|*.gff3)
+        ANNOTATION_FORMAT_ARGS=()
+        ;;
+    *)
+        printf 'ERROR: Unsupported annotation file extension: %s\n' "$ANNOTATION" >&2
+        exit 1
+        ;;
+esac
+
+printf 'Annotation/extract file: %s\n' "$ANNOTATION"
+if [[ "${#ANNOTATION_FORMAT_ARGS[@]}" -gt 0 ]]; then
+    printf 'Annotation format arguments: %s\n' "${ANNOTATION_FORMAT_ARGS[*]}"
+else
+    printf 'Annotation format arguments: default GTF/GFF mode\n'
+fi
+printf '\n'
 
 # Find BAM files directly inside BAM_DIR. Change -maxdepth if BAM files are nested.
 mapfile -t BAM_FILES < <(find "$BAM_DIR" -maxdepth 1 -type f -name "*.bam" | sort)
@@ -100,18 +163,32 @@ printf '\n'
 # -M : count multi-mapping reads
 # -s 2 : reversely stranded library; change to 0 for unstranded or 1 for forward-stranded
 # -T : number of threads; matched to SLURM -n 8
-# -t exon : count exon features
-# -g gene_id : summarise counts by gene_id attribute in the GTF
-featureCounts \
-    -p \
-    -M \
-    -s 2 \
-    -T 8 \
-    -t exon \
-    -g gene_id \
-    -a "$ANNOTATION" \
-    -o "$OUT_FILE" \
-    "${BAM_FILES[@]}"
+# -t exon : count exon features for GTF/GFF input
+# -g gene_id : summarise counts by gene_id attribute for GTF/GFF input
+#
+# For SAF input, featureCounts uses the GeneID column from the SAF file.
+if [[ "$ANNOTATION" == *.saf ]]; then
+    featureCounts \
+        -p \
+        -M \
+        -s 2 \
+        -T 8 \
+        -F SAF \
+        -a "$ANNOTATION" \
+        -o "$OUT_FILE" \
+        "${BAM_FILES[@]}"
+else
+    featureCounts \
+        -p \
+        -M \
+        -s 2 \
+        -T 8 \
+        -t exon \
+        -g gene_id \
+        -a "$ANNOTATION" \
+        -o "$OUT_FILE" \
+        "${BAM_FILES[@]}"
+fi
 
 printf '\nfeatureCounts complete.\n'
 printf 'Output written to: %s\n' "$OUT_FILE"
