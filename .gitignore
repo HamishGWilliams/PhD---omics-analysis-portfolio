@@ -1,74 +1,238 @@
-# History files
+# -----------------------------------------------------------------------------
+# R / RStudio
+# -----------------------------------------------------------------------------
 .Rhistory
 .Rapp.history
-
-# Session Data files
 .RData
 .RDataTmp
-
-# User-specific files
 .Ruserdata
+.Renviron
+.Rproj.user/
+*.Rproj
 
 # Example code in package build process
 *-Ex.R
 
-# Output files from R CMD build
+# Output files from R CMD build/check
 /*.tar.gz
-
-# Output files from R CMD check
 /*.Rcheck/
 
-# RStudio files
-.Rproj.user/
-
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
-
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
-
-# knitr and R markdown default cache directories
+# knitr / R Markdown caches and intermediates
 *_cache/
 /cache/
-
-# Temporary files created by R markdown
 *.utf8.md
 *.knit.md
+*.html
 
-# R Environment Variables
-.Renviron
-
-# pkgdown site
-docs/
-
-# translation temp files
-po/*~
-
-# RStudio Connect folder
+# RStudio Connect
 rsconnect/
 
-# OrgDB files - too large to store
-*.sqlite
-*.db/
-.db
-org.Aequina.eg.db/
-org.Aequina.eg.db/inst/extdata/org.Aequina.eg.sqlite
-org.Aequina.eg.db/inst/extdata/
+# pkgdown site only at repository root; do not ignore chapter docs folders
+/docs/
 
-# Any fasta files and other large sequencing files
-*.fa
-*.fasta
-*.fa.gz
-*.fasta.gz
-*.fastq.gz
+# Translation temp files
+po/*~
+
+
+# -----------------------------------------------------------------------------
+# Operating system / editor temporary files
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+
+# -----------------------------------------------------------------------------
+# Logs and scheduler outputs
+# -----------------------------------------------------------------------------
+*.log
+*.out
+*.err
+slurm-*.out
+slurm-*.err
+*.stdout
+*.stderr
+
+# Chapter log folders
+chapter_*/logs/outputs/
+chapter_*/logs/errors/
+chapter_*/results/logs/
+
+
+# -----------------------------------------------------------------------------
+# Raw and intermediate sequencing data
+# -----------------------------------------------------------------------------
 *.fastq
+*.fq
+*.fastq.gz
+*.fq.gz
 *.sam
 *.bam
-*.out
+*.bai
+*.bam.bai
+*.cram
+*.crai
 
-# chapter_1 large file directories
-chapter_1/data/external
-chapter_1/data/trimmed
-chapter_1/data/processed/bam
-chapter_1/data/processed/index
+# Reference sequence files and indexes
+*.fa
+*.fasta
+*.fna
+*.fa.gz
+*.fasta.gz
+*.fna.gz
+*.fai
+*.dict
+*.2bit
+*.bt2
+*.bt2l
+*.ht2
+*.ht2l
+*.amb
+*.ann
+*.bwt
+*.pac
+*.sa
+
+# Common compressed archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.gz
+
+# But allow compressed text tables if you intentionally want to track them
+!*.csv.gz
+!*.tsv.gz
+!*.txt.gz
+
+
+# -----------------------------------------------------------------------------
+# RNA-seq pipeline outputs
+# -----------------------------------------------------------------------------
+# Trimming / QC
+*_fastqc.html
+*_fastqc.zip
+fastqc/
+multiqc_data/
+multiqc_report.html
+
+# Alignment / quantification intermediates
+*.sra
+*.sra.cache
+*.junc
+*.junction
+*.sjdb
+SJ.out.tab
+Log.final.out
+Log.out
+Log.progress.out
+Aligned.out.sam
+Aligned.sortedByCoord.out.bam
+Aligned.toTranscriptome.out.bam
+ReadsPerGene.out.tab
+featureCounts*.txt.summary
+
+# Salmon / kallisto / other quantification folders
+salmon*/
+kallisto*/
+quant.sf
+abundance.tsv
+abundance.h5
+
+
+# -----------------------------------------------------------------------------
+# EM-seq / bisulfite-style methylation pipeline outputs
+# -----------------------------------------------------------------------------
+# Bismark / methylation extraction intermediates
+*_bismark_bt2.bam
+*_bismark_bt2_pe.bam
+*.deduplicated.bam
+*.deduplicated.bam.bai
+*.deduplication_report.txt
+*_splitting_report.txt
+*_M-bias.txt
+*.M-bias.txt
+*.cov
+*.cov.gz
+*.bedGraph
+*.bedGraph.gz
+*.bismark.cov.gz
+CX_report.txt
+CX_report.*.txt
+*.CX_report.txt
+*.CX_report.txt.gz
+CHG_context_*.txt
+CHH_context_*.txt
+CpG_context_*.txt
+methylation_extractor/
+bismark_reports/
+bismark_results/
+
+# MethylKit / DSS / DMR intermediate objects
+*.meth
+*.meth.gz
+*.cov.bismark.txt
+*.cov.bismark.txt.gz
+
+
+# -----------------------------------------------------------------------------
+# Functional annotation / enrichment large local databases
+# -----------------------------------------------------------------------------
+*.sqlite
+*.db
+*.db/
+org.*.eg.db/
+
+# BLAST / DIAMOND / MMseqs databases and temp files
+*.pin
+*.phr
+*.psq
+*.nin
+*.nhr
+*.nsq
+*.dmnd
+*.mmi
+*.mmsdb
+mmseqs_tmp/
+blastdb/
+
+
+# -----------------------------------------------------------------------------
+# Chapter-level large data directories
+# -----------------------------------------------------------------------------
+# Keep lightweight metadata, scripts, docs, selected tables and figures in Git.
+# Keep raw reads, trimmed reads, alignments, indexes and large generated objects out.
+chapter_*/data/raw/
+chapter_*/data/trimmed/
+chapter_*/data/aligned/
+chapter_*/data/bam/
+chapter_*/data/index/
+chapter_*/data/indices/
+chapter_*/data/reference/
+chapter_*/data/references/
+chapter_*/data/intermediate/
+chapter_*/data/intermediates/
+chapter_*/data/tmp/
+chapter_*/data/temp/
+
+# Specific existing large-data locations
+chapter_1/data/external/
+chapter_1/data/processed/bam/
+chapter_1/data/processed/index/
+chapter_2/data/bismark_results/
+chapter_2/data/base-level_dma_data/
+chapter_3/data/large_data_files/
+
+
+# -----------------------------------------------------------------------------
+# Large binary analysis objects
+# -----------------------------------------------------------------------------
+*.RData
+*.rdata
+*.rds
+*.RDS
+*.h5
+*.hdf5
+*.loom
