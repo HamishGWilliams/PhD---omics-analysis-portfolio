@@ -236,3 +236,15 @@ chapter_3/data/large_data_files/
 *.h5
 *.hdf5
 *.loom
+
+# Chapter 2 large external/reference files
+chapter_2/data/external/*.gff3
+chapter_2/data/external/*.gff
+chapter_2/data/external/*.fa
+chapter_2/data/external/*.fasta
+chapter_2/data/external/*.fna
+chapter_2/data/external/*.out
+
+# Chapter 2 large/generated processing outputs
+chapter_2/data/processed/
+chapter_2/results/tmp/
