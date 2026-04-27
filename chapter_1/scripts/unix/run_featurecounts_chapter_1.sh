@@ -17,7 +17,7 @@ set -euo pipefail
 #   sbatch scripts/unix/run_featurecounts_chapter_1.sh
 
 CHAPTER_DIR="/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_1"
-BAM_DIR="$CHAPTER_DIR/data/processed"
+BAM_DIR="$CHAPTER_DIR/data/processed/bam"
 ANNOTATION_DIR="$CHAPTER_DIR/data/external"
 OUT_DIR="$CHAPTER_DIR/results/tables/featurecounts"
 OUT_FILE="$OUT_DIR/A_Equina_Counts.txt"

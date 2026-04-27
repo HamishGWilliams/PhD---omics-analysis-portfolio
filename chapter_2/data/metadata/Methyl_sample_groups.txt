@@ -1,0 +1,19 @@
+Label	Sample	Group	Clone
+15_D	15 A4	A	Clone15
+22_D	9 A7	A	Clone9 
+27_D	2 A6	A	Clone2 
+3_D	5 A1	A	Clone5 
+10_D	6 B5	B	Clone6 
+11_redo_D	12 B6	B	Clone12
+18_redo_D	20 B?	B	Clone20
+6_D	19 B2	B	Clone19
+7_D	8 B?	B	Clone8 
+14_D	8 C5	C	Clone8 
+2_redo_D	6 C2	C	Clone6 
+20_D	19 C6	C	Clone19
+21_D	12 C3	C	Clone12
+8_D	20 C7	C	Clone20
+13_D	9 X2	X	Clone9 
+16_D	2 X1	X	Clone2 
+17_D	5 X3	X	Clone5 
+9_D	15 X6	X	Clone15

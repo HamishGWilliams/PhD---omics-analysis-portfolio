@@ -1,0 +1,9 @@
+#!/bin/bash
+
+#SBATCH --job-name=download_trembl_database
+#SBATCH -c 8
+#SBATCH --mem 32G
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=r02hw22@abdn.ac.uk
+
+wget https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_trembl.fasta.gz
