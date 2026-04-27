@@ -1,0 +1,6 @@
+Description of methods
+The raw Fastq files are trimmed for the presence of Illumina adapter sequences using Cutadapt version 1.2.1 [Reference]. The option -O 3 was used, so the 3' end of any reads which match the adapter sequence for 3 bp. or more are trimmed.
+
+The reads are further trimmed using Sickle version 1.200 with a minimum window quality score of 20. Reads shorter than 15 bp. after trimming were removed. If only one of a read pair passed this filter, it is included in the R0 file. The output files from Cutadapt and Sickle are available here.
+
+Statistics were generated using fastq-stats from EAUtils.
