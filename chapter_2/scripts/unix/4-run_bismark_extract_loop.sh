@@ -3,7 +3,7 @@
 #SBATCH --mem=96G
 #SBATCH --partition=uoa-compute
 #SBATCH -N 1
-#SBATCH -n 8
+#SBATCH -n 16
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=h.williams.22@abdn.ac.uk
 #SBATCH --time=3-00:00:00
