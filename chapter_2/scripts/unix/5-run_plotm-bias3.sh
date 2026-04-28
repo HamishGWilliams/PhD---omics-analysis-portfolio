@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=plot_mbias
-#SBATCH --mem=6G
+#SBATCH --mem=16G
 #SBATCH -N 1
 #SBATCH -n 8
 #SBATCH --mail-type=ALL

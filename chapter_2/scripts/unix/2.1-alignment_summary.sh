@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=summarise_alignment
-#SBATCH --mem=4G
+#SBATCH --mem=8G
 #SBATCH --partition=uoa-compute
 #SBATCH -N 1
 #SBATCH -n 1

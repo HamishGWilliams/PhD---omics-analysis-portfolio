@@ -11,8 +11,6 @@
 #SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
 #SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
 
-set -euo pipefail
-
 # -------------------------------
 # Modules
 # -------------------------------
@@ -38,7 +36,7 @@ mkdir -p "$REPEAT_DIR"
 # Input files
 # -------------------------------
 
-GENOME_FASTA="$EXTERNAL_DIR/A_Equina.fa"
+GENOME_FASTA="$EXTERNAL_DIR/a_equina.fa"
 FLANK_GFF="$EXTERNAL_DIR/a_equina_with_1kb_flanks.gff3"
 
 # -------------------------------

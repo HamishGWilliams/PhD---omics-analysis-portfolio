@@ -1,8 +1,10 @@
 #!/bin/bash
-#SBATCH --mem 16G
-#SBATCH -N 1
-#SBATCH -n 1
-#SBATCH --mail-type=ALL
+#SBATCH --job-name=bismark_align
+#SBATCH --mem=128G
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=40
+#SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=r02hw22@abdn.ac.uk
 #SBATCH --time=1-00:00:00
 #SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
