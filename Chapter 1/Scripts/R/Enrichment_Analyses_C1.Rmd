@@ -1,0 +1,1957 @@
+---
+title: "Enrichment_Analysis_C1"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 7
+    toc: true
+    toc_depth: 3
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+# Overview
+
+This Markdown script will walk through all of the necessary steps undertaken to complete the **Gene Set Enrichment Analysis** and Over-representation **analysis** for the paired exposure experiment. This follows immediately from the **Differential Expression Analysis** results, and uses them to complete this analysis.
+
+I was finding that even with the previous markdown sheet, that I generated a massive markdown sheet which was not easy to follow, which made it very difficult to understand the flow of the analysis, and at what stage of the process I was in. I have gone away and created a nice flow diagram which will neatly show the general flow of the analysis, and should make it much easier for myself and any other researchers who read this markdown to understand the process, and the steps undertaken to perform this analysis.
+
+However, this is not a general guide to GSEA and Enrichment based analysis. Although I think that these types of content are very lacking in the scientific sphere, this script is not to be used as a single end all be all one step guide to completing this analysis. This markdown will wlakthrough the steps I have taken for my analysis, explaining and justifying parameter settings and additional actions required to complete the analysis. Experiments and analysis as a whole should be tailored to each experiment, and consideration of how best to tune the analyses to that experiment is important for statistical design, and for answering the specific questions of one's own research aims.
+
+# Building Functions
+
+## check_packages_ClusterProfilerR & Loading Packages
+
+Function built to make loading and downloading of packages easier for reproducibility.
+
+```{r check_packages_ClusterProfilerR, message=FALSE, warning=FALSE, results='hide'}
+check_packages_ClusterProfileR <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      install.packages(pkg)
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+# Generate a dataframe with a list of packages required
+
+pkg_list_ClusterProfileR<-c("tidyverse", # manipulations
+                            "tibble", # tables
+                            "stats", # stats
+                            "ggplot2", # plottin
+                            "dplyr", # manipulation
+                            "tidyr", # manipulation
+                            "ggfortify", # plotting
+                            "knitr",# markdown
+                            "clusterProfiler", # enrichment analysis
+                            "enrichplot", # plotting
+                            "data.table", # data formatting
+                            "plotly", # plotting
+                            "ggVennDiagram", # plotting
+                            "VennDiagram", # plotting
+                            "limma", # plotting
+                            "ggridges", # plotting
+                            "stringr") # manipulations
+
+# Run Function::
+check_packages_ClusterProfileR(pkg_list_ClusterProfileR)
+```
+
+## convertFractionToNumeric
+
+Used to convert gene ratios in final analyses to numerical values for generating figures
+
+```{r convertFractionToNumeric, message=FALSE, warning=FALSE}
+convertFractionToNumeric <- function(fraction) {
+  fraction_parts <- strsplit(fraction, "/")[[1]]
+  numerator <- as.numeric(fraction_parts[1])
+  denominator <- as.numeric(fraction_parts[2])
+  numeric_value <- numerator / denominator
+  return(numeric_value)
+}
+```
+
+# Importing and Formatting Data
+
+As outlined by the flow diagram, there are 3 main pieces of data needed to start the analysis. This include **Gene Ontology** data file (UNIPROT_results.txt), which contains the GO data for Biological Processes and Molecular Functions for the blastp matched genes of the UNIPROT database; a **Matching File**, which contains the names of the genes from *A. equina* vs. the Blastp result names - will be used to match the gene names to the blastp results; and finally the **Differential Expression Results**, which includes both the experiments completed (short and long)
+
+```{r Importing_Data, results='hide'}
+# Import BP and MF terms file ----
+BP_MF_Terms <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/UNIPROT_results.txt",
+                          header = T, 
+                          sep = '\t', 
+                          stringsAsFactors = FALSE)
+
+# Import the blastp (matching) file ----
+matching_file <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/genome_matching_file.txt", 
+                            header = F, 
+                            sep = '\t', 
+                            stringsAsFactors = FALSE)
+
+# Change the name of the columns to be identical ----
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+  
+# Merge blastp & GO terms ----
+  # Merge DEG Files:
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
+# Subset Dataframe
+merged_df <- subset(merged_df[, c("V1","ID","GO:BP","GO:MF")])
+# Change Variable names
+names(merged_df)[names(merged_df) == "V1"] <- "GENE"
+
+# Separate BP and MF GOs ----
+# Select BP column:
+BP <- merged_df[,c("GENE","ID","GO:BP")]
+BP <- BP[!apply(BP == "", 1, any), ]
+BP <- BP[!duplicated(BP), ]
+BP <- na.omit(BP)
+# Extract GO terms:
+GENES_BP <- BP
+GENES_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_BP$`GO:BP`)
+GENES_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_BP$`GO:BP`[bracketed_rows])
+GENES_BP <- GENES_BP[, c("GO","GENE")]
+GENES_BP <- GENES_BP[!duplicated(GENES_BP), ]
+GENES_BP <- GENES_BP[complete.cases(GENES_BP),]
+
+## Extract Terms:
+TERMs_BP <- BP
+TERMs_BP$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_BP$`GO:BP`)
+TERMs_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP$`GO:BP`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_BP$`GO:BP`[bracketed_rows])
+TERMs_BP <- TERMs_BP[, c("GO","GO:BP")]
+TERMs_BP <- TERMs_BP[!duplicated(TERMs_BP), ]
+names(TERMs_BP)[names(TERMs_BP) == "GO:BP"] <- "GENENAMES_BP"
+TERMs_BP <- TERMs_BP[complete.cases(TERMs_BP),]
+
+# Select MF column:
+MF <- merged_df[,c("GENE","ID","GO:MF")]
+MF <- MF[!apply(MF == "", 1, any), ]
+MF <- MF[!duplicated(MF), ]
+MF <- na.omit(MF)
+# Extract GO terms:
+GENES_MF <- MF
+GENES_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", GENES_MF$`GO:MF`)
+GENES_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_MF$`GO:MF`[bracketed_rows])
+GENES_MF <- GENES_MF[, c("GO","GENE")]
+GENES_MF <- GENES_MF[!duplicated(GENES_MF), ]
+GENES_MF <- GENES_MF[complete.cases(GENES_MF),]
+
+## Extract Terms:
+TERMs_MF <- MF
+TERMs_MF$GO <- ""
+bracketed_rows <- grepl("\\[.*\\]", TERMs_MF$`GO:MF`)
+TERMs_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF$`GO:MF`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_MF$`GO:MF`[bracketed_rows])
+TERMs_MF <- TERMs_MF[, c("GO","GO:MF")]
+TERMs_MF <- TERMs_MF[!duplicated(TERMs_MF), ]
+names(TERMs_MF)[names(TERMs_MF) == "GO:MF"] <- "GENENAMES_MF"
+TERMs_MF <- TERMs_MF[complete.cases(TERMs_MF),]
+
+# Import DEA results ----
+DE_results_1 <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+DE_results_2 <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+## Perform naming transformation to make gene IDs matching ----
+DE_results_1$X <- gsub("\\.TU", "", DE_results_1$X) # Removing "TU" part of names
+DE_results_1$X <- gsub("path", "mrna", DE_results_1$X) # Replacing "path" -> "mrna"
+DE_results_2$X <- gsub("\\.TU", "", DE_results_2$X) # Removing "TU" part of names
+DE_results_2$X <- gsub("path", "mrna", DE_results_2$X) # Replacing "path" -> "mrna"
+
+# DEGs lists for ORA ----
+DEGs <- DE_results_1[(DE_results_1$padj < 0.1),]
+DEGs <- DEGs[complete.cases(DEGs),]
+DEGs_1 <- as.vector(DEGs[,1])
+length(DEGs_1)
+  # save DEGs list version for other work
+DEGs <- DE_results_2[(DE_results_2$padj < 0.1),]
+DEGs <- DEGs[complete.cases(DEGs),]
+DEGs_2 <- as.vector(DEGs[,1])
+length(DEGs_2)
+
+# Create geneList objects for GSEA analyses ----
+# Feature 1: numeric vector (LFC)
+geneList_1 = DE_results_1[,3]
+geneList_2 = DE_results_2[,3]
+# Feature 2: Named Vector (rownames)
+names(geneList_1) = as.character(DE_results_1[,1])
+names(geneList_2) = as.character(DE_results_2[,1])
+# feature 3: decreasing order;
+geneList_1 = sort(geneList_1, decreasing = TRUE)
+geneList_2 = sort(geneList_2, decreasing = TRUE)
+```
+
+# MAJOR ISSUE IN CODE:
+
+!!! MAJOR ISSUE DISCOVERED !!!
+  
+The previous code is unable to sufficiently parse rows where there are multiple GOs. This is leading to annotation collapse, and w ar not capturing all of the GOs. I need to fix this code not just for this chapter, but all other data chapters too!!!
+
+Fixing the code:
+
+```{r capture_gos_fix}
+BP_MF_Terms <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/UNIPROT_results.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  quote = ""
+)
+
+matching_file <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/genome_matching_file.txt",
+  header = FALSE,
+  sep = "\t",
+  stringsAsFactors = FALSE
+)
+
+# Change the name of the columns to be identical ----
+{
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(matching_file)[names(matching_file) == "V1"] <- "GENE"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+}
+  
+# Merge all matched BLAST rows with UniProt GO annotations
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
+
+# -------------------------------
+# Helper function:
+# expands one GO column so that each GO term becomes its own row
+# -------------------------------
+expand_go_column_mem <- function(
+  df,
+  go_col,
+  gene_col = "GENE",
+  id_col = "ID",
+  deduplicate = FALSE
+) {
+  empty_out <- data.frame(
+    GENE = character(),
+    ID   = character(),
+    GO   = character(),
+    TERM = character(),
+    stringsAsFactors = FALSE
+  )
+
+  go_text  <- df[[go_col]]
+  gene_vec <- df[[gene_col]]
+  id_vec   <- df[[id_col]]
+
+  # Keep only usable rows up front
+  keep <- !is.na(go_text) &
+          trimws(go_text) != "" &
+          !is.na(gene_vec) &
+          !is.na(id_vec)
+
+  if (!any(keep)) {
+    return(empty_out)
+  }
+
+  go_text  <- go_text[keep]
+  gene_vec <- gene_vec[keep]
+  id_vec   <- id_vec[keep]
+
+  # First pass: count how many GO entries will be created
+  counts <- integer(length(go_text))
+
+  for (i in seq_along(go_text)) {
+    pieces <- trimws(strsplit(go_text[i], ";", fixed = TRUE)[[1]])
+    counts[i] <- sum(grepl("\\[GO:[0-9]{7}\\]", pieces))
+  }
+
+  total_rows <- sum(counts)
+
+  if (total_rows == 0L) {
+    return(empty_out)
+  }
+
+  # Preallocate final vectors once
+  GENE <- character(total_rows)
+  ID   <- character(total_rows)
+  GO   <- character(total_rows)
+  TERM <- character(total_rows)
+
+  pos <- 1L
+
+  # Second pass: fill preallocated vectors
+  for (i in seq_along(go_text)) {
+    if (counts[i] == 0L) next
+
+    pieces <- trimws(strsplit(go_text[i], ";", fixed = TRUE)[[1]])
+    pieces <- pieces[grepl("\\[GO:[0-9]{7}\\]", pieces)]
+
+    n_terms <- length(pieces)
+    idx <- pos:(pos + n_terms - 1L)
+
+    GENE[idx] <- gene_vec[i]
+    ID[idx]   <- id_vec[i]
+    GO[idx]   <- sub(".*\\[(GO:[0-9]{7})\\].*", "\\1", pieces)
+    TERM[idx] <- trimws(sub("\\s*\\[GO:[0-9]{7}\\]\\s*$", "", pieces))
+
+    pos <- pos + n_terms
+  }
+
+  out <- data.frame(
+    GENE = GENE,
+    ID   = ID,
+    GO   = GO,
+    TERM = TERM,
+    stringsAsFactors = FALSE
+  )
+
+  rownames(out) <- NULL
+
+  if (deduplicate) {
+    out <- unique(out)
+    rownames(out) <- NULL
+  }
+
+  out
+}
+
+# -------------------------------
+# Expand BP and MF properly
+# -------------------------------
+# remove files for space
+rm(BP_MF_Terms,
+   matching_file)
+  
+  # Still having memory issue, need to split file in half and run separately
+# -------------------------------
+# Split merged_df into thirds
+# -------------------------------
+n <- nrow(merged_df)
+
+idx1 <- 1:floor(n / 3)
+idx2 <- (floor(n / 3) + 1):floor(2 * n / 3)
+idx3 <- (floor(2 * n / 3) + 1):n
+
+part1 <- merged_df[idx1, , drop = FALSE]
+part2 <- merged_df[idx2, , drop = FALSE]
+part3 <- merged_df[idx3, , drop = FALSE]
+
+rm(merged_df,
+   idx1,
+   idx2,
+   idx3,
+   n)
+
+# -------------------------------
+# Expand GO:BP in chunks
+# -------------------------------
+BP_long_1 <- expand_go_column_mem(part1, "GO:BP", deduplicate = FALSE)
+BP_long_2 <- expand_go_column_mem(part2, "GO:BP", deduplicate = FALSE)
+BP_long_3 <- expand_go_column_mem(part3, "GO:BP", deduplicate = FALSE)
+
+BP_long <- unique(rbind(BP_long_1, BP_long_2, BP_long_3))
+rm(BP_long_1, BP_long_2, BP_long_3)
+gc()
+
+# -------------------------------
+# Expand GO:MF in chunks
+# -------------------------------
+MF_long_1 <- expand_go_column_mem(part1, "GO:MF", deduplicate = FALSE)
+MF_long_2 <- expand_go_column_mem(part2, "GO:MF", deduplicate = FALSE)
+MF_long_3 <- expand_go_column_mem(part3, "GO:MF", deduplicate = FALSE)
+
+MF_long <- unique(rbind(MF_long_1, MF_long_2, MF_long_3))
+rm(MF_long_1, MF_long_2, MF_long_3)
+gc()
+
+# Only make downstream objects after BP_long / MF_long are finished
+GENES_BP <- unique(BP_long[, c("GO", "GENE")])
+GENES_MF <- unique(MF_long[, c("GO", "GENE")])
+
+TERMs_BP <- unique(BP_long[, c("GO", "TERM")])
+TERMs_MF <- unique(MF_long[, c("GO", "TERM")])
+
+# remove redundant dfs now
+rm(part1,
+   part2,
+   part3,
+   BP_long,
+   MF_long)
+
+save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/BP_MF_long_extractions.RData")
+
+# load when needed
+  # load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/BP_MF_long_extractions.RData")
+```
+
+## Tidy up Environment
+
+```{r Tidy_up, results='hide'}
+# Tidy up environment..
+    rm(MF,
+       BP,
+       BP_MF_Terms,
+       matching_file,
+       DEGs,
+       merged_df,
+       bracketed_rows
+       )
+
+# Save Environment
+save.image(file = "ORA_exp1_prep.RData")
+```
+
+# Overrepresentation Analysis
+
+## Experiment 1
+
+```{r ORA_exp1, results='hide'}
+# Load environment for analysis
+load("ORA_exp1_prep.RData")
+
+# Run ORA
+set.seed(100)
+ORA_exp1_BP <- enricher(DEGs_1, 
+                TERM2GENE = GENES_BP,
+                TERM2NAME = TERMs_BP,
+                minGSSize=1)
+
+set.seed(100)
+ORA_exp1_MF <- enricher(DEGs_1, 
+                TERM2GENE = GENES_MF,
+                TERM2NAME = TERMs_MF,
+                minGSSize=1)
+
+# Extract results and add in GO identifiers
+ORA_exp1_BP_results <- ORA_exp1_BP@result
+ORA_exp1_BP_results$GO <- "biological_processes"
+
+ORA_exp1_MF_results <- ORA_exp1_MF@result
+ORA_exp1_MF_results$GO <- "molecular_functions"
+
+# combine results and subset for significant values
+ORA_exp1_results <- rbind(ORA_exp1_BP_results, ORA_exp1_MF_results)
+rm(ORA_exp1_BP_results, ORA_exp1_MF_results, ORA_exp1_BP, ORA_exp1_MF)
+ORA_exp1_results <- subset(ORA_exp1_results[ORA_exp1_results$p.adjust < 0.1,])
+
+# Change fractions to numeric values
+ORA_exp1_results$GeneRatio <- sapply(ORA_exp1_results$GeneRatio, convertFractionToNumeric)
+ORA_exp1_results$BgRatio <- sapply(ORA_exp1_results$BgRatio, convertFractionToNumeric)
+
+## Export Dataframe results
+write.csv(ORA_exp1_results, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results.csv", row.names = FALSE)
+
+## ... Replace GO descriptions with matched descriptions of GO:ID from QuickGO
+  # import results with QuickGO descriptions
+
+ORA_exp1_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp1_combined_long <- ORA_exp1_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+```
+
+
+## Experiment 2
+```{r ORA_exp2, results='hide'}
+# Load environment for analysis
+#load("ORA_exp1_prep.RData")
+
+# Run ORA
+set.seed(100)
+ORA_exp2_BP <- enricher(DEGs_2, 
+                TERM2GENE = GENES_BP,
+                TERM2NAME = TERMs_BP,
+                minGSSize=1)
+
+set.seed(100)
+ORA_exp2_MF <- enricher(DEGs_2, 
+                TERM2GENE = GENES_MF,
+                TERM2NAME = TERMs_MF,
+                minGSSize=1)
+
+# Extract results and add in GO identifiers
+ORA_exp2_BP_results <- ORA_exp2_BP@result
+ORA_exp2_BP_results$GO <- "biological_processes"
+
+ORA_exp2_MF_results <- ORA_exp2_MF@result
+ORA_exp2_MF_results$GO <- "molecular_functions"
+
+# combine results and subset for significant values
+ORA_exp2_results <- rbind(ORA_exp2_BP_results, ORA_exp2_MF_results)
+rm(ORA_exp2_BP_results, ORA_exp2_MF_results, ORA_exp2_BP, ORA_exp2_MF)
+ORA_exp2_results <- subset(ORA_exp2_results[ORA_exp2_results$p.adjust < 0.1,])
+
+# Change fractions to numeric values
+ORA_exp2_results$GeneRatio <- sapply(ORA_exp2_results$GeneRatio, convertFractionToNumeric)
+ORA_exp2_results$BgRatio <- sapply(ORA_exp2_results$BgRatio, convertFractionToNumeric)
+
+## Export Dataframe results
+write.csv(ORA_exp2_results, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results.csv", row.names = FALSE)
+
+## ... Replace GO descriptions with matched descriptions of GO:ID from QuickGO
+  # import results with QuickGO descriptions
+
+ORA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+rm(lfc_map)
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp2_combined_long <- ORA_exp2_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+```
+
+### combine ORA results files
+
+Combining the results to be able to create a single supplementary figure for the chapter
+
+```{r ORA_supplementary_table_data}
+# Need to round the LFC values and other numeric values before nesting
+# exp1
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(round(lfc_map[genes], 4), collapse = "/")
+    })
+  )
+
+# exp2
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(round(lfc_map[genes], 4), collapse = "/")
+    })
+  )
+
+ORA_exp1_combined_nested$Experiment <- "Acute"
+ORA_exp2_combined_nested$Experiment <- "Primed"
+
+ORA_results_nested_combined <- rbind(ORA_exp1_combined_nested,
+                                     ORA_exp2_combined_nested)
+
+# Refine DF
+ORA_results_nested_combined_refined <- ORA_results_nested_combined %>%
+  dplyr::select(Experiment, ID, Description_QuickGO, GeneRatio, BgRatio, p.adjust, qvalue, geneID, log2FoldChange) %>%
+  arrange(Experiment, p.adjust)
+
+# round all other numeric columns
+ORA_results_nested_combined_refined <- ORA_results_nested_combined_refined %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4)))
+
+write.csv(ORA_results_nested_combined_refined, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_results_nested_combined.csv", row.names = FALSE)
+```
+
+# Gene Set Enrichment Analysis
+
+## Experiment 1
+```{r GSEA_exp1}
+# Load Environment
+# load("GSEA_exp1.RData")
+
+# Run GSEA
+set.seed(100)
+GSEA_exp1_BP<- GSEA(geneList_1,
+           TERM2GENE = GENES_BP,
+           TERM2NAME = TERMs_BP,
+           pvalueCutoff = 0.1)
+set.seed(100)
+GSEA_exp1_MF<- GSEA(geneList_1,
+           TERM2GENE = GENES_MF,
+           TERM2NAME = TERMs_MF,
+           pvalueCutoff = 0.1)
+
+# Get Results
+GSEA_exp1_BP_results <- GSEA_exp1_BP@result
+GSEA_exp1_BP_results$GO <- "biological_processes"
+
+GSEA_exp1_MF_results <- GSEA_exp1_MF@result
+GSEA_exp1_MF_results$GO <- "molecular_function"
+
+
+  # no results...
+```
+
+## Experiment 2
+```{r GSEA_exp2}
+# Run GSEA
+set.seed(100)
+GSEA_exp2_BP<- GSEA(geneList_2,
+           TERM2GENE = GENES_BP,
+           TERM2NAME = TERMs_BP,
+           pvalueCutoff = 0.1)
+set.seed(100)
+GSEA_exp2_MF<- GSEA(geneList_2,
+           TERM2GENE = GENES_MF,
+           TERM2NAME = TERMs_MF,
+           pvalueCutoff = 0.1)
+
+# Get Results
+GSEA_exp2_BP_results <- GSEA_exp2_BP@result
+GSEA_exp2_BP_results$GO <- "biological_processes"
+
+GSEA_exp2_MF_results <- GSEA_exp2_MF@result
+GSEA_exp2_MF_results$GO <- "molecular_function"
+
+# Merge results
+GSEA_exp2_results <- rbind(GSEA_exp2_BP_results, GSEA_exp2_MF_results)
+
+# Subset for only significant results
+GSEA_exp2_results <- subset(GSEA_exp2_results[GSEA_exp2_results$p.adjust < 0.1,])
+
+# Combine all results into single listed df
+GSEA_exp2 <- list("BP" = GSEA_exp2_BP,
+                  "MF" = GSEA_exp2_MF,
+                  "Results" = GSEA_exp2_results)
+
+# Clean-up 
+rm(GSEA_exp2_MF_results, 
+   GSEA_exp2_BP_results,
+   GSEA_exp2_results,
+   GSEA_exp2_BP,
+   GSEA_exp2_MF)
+
+## Export Dataframe results
+write.csv(GSEA_exp2[["Results"]], "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results.csv", row.names = FALSE)
+
+# Capture QuickGO names... re-import
+GSEA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# nested and long versions
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+GSEA_exp2_results <- GSEA_exp2[["Results"]]
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+GSEA_exp2_results_nested <- GSEA_exp2_results %>%
+  mutate(
+    core_enrichment = as.character(core_enrichment),
+    log2FoldChange = sapply(strsplit(core_enrichment, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+GSEA_exp2_results_long <- GSEA_exp2_results %>%
+  mutate(core_enrichment = as.character(core_enrichment)) %>%
+  separate_rows(core_enrichment, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[core_enrichment])
+```
+
+# Plotting Figures
+
+```{r enrichment_plots}
+# ORA plots ----
+  # Exp1
+p_boxes <- ORA_exp1_combined_long %>%
+  mutate(
+    Description = fct_reorder(
+      Description,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+
+# Exp2
+p_boxes <- ORA_exp2_combined_long %>%
+  mutate(
+    Description = fct_reorder(
+      Description,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+
+## GSEA plot ----
+p_boxes <- GSEA_exp2_results_long %>%
+  mutate(
+    Description = fct_reorder(
+      Description,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+```
+
+# Semantic Clustering
+
+Only really applicable with the ORA results since there are 82 in total, which is far too many to represent in a single plot, so semantic clustering allows us to group related terms together to better represent them in figures. But for supplementary materials it is still best to include all of the individual results since they should still be investigated and interpreted individually for best possible qualitative assessment of functional terms in relation to the experiments completed
+
+## Make OrgDB
+
+```{r make_a_equina_orgdb}
+save.image(file = "tmp1.RData")
+load("tmp1.RData")
+
+library(AnnotationForge)
+library(AnnotationDbi)
+library(GO.db)
+library(GOSemSim)
+
+# If you use GOSemSim in published research, please cite:
+# - Guangchuang Yu. Gene Ontology Semantic Similarity Analysis Using GOSemSim. In: Kidder B. (eds) Stem Cell Transcriptional Networks. Methods in Molecular Biology, 2020, 2117:207-215. Humana, New York, NY.  doi:10.1007/978-1-0716-0301-7_11
+# - Guangchuang Yu, Fei Li, Yide Qin, Xiaochen Bo, Yibo Wu, Shengqi Wang. GOSemSim: an R package formeasuring semantic similarity among GO terms and gene products Bioinformatics 2010, 26(7):976-978.  doi:10.1093/bioinformatics/btq064
+
+# Need to make a dataframe with the following columns:
+  # GID = the gene ID, e.g., ev,.utg4.1
+  # Symbol = optional, dont need
+  # GENENAME = Description of GO, e.g., DNA transcription factor ...
+
+# GENES_BP and TERMS_BP contain the data I need
+
+# Close any open connections that might keep the SQLite file locked
+try(closeAllConnections(), silent = TRUE)
+
+# Remove old SQLite file and old package build directory
+unlink("./org.Aequina.eg.sqlite", force = TRUE)
+unlink("./org.Aequina.eg.db", recursive = TRUE, force = TRUE)
+
+# Optional: confirm they are gone
+file.exists("./org.Aequina.eg.sqlite")
+dir.exists("./org.Aequina.eg.db")
+
+# Combine BP and MF gene-to-GO mappings
+all_go_raw <- bind_rows(
+  GENES_BP %>% dplyr::select(GO, GENE),
+  GENES_MF %>% dplyr::select(GO, GENE)
+) %>%
+  filter(!is.na(GO), !is.na(GENE)) %>%
+  distinct()
+
+# Minimal gene table for OrgDb
+gene_info <- all_go_raw %>%
+  distinct(GENE) %>%
+  transmute(
+    GID = GENE,
+    SYMBOL = GENE,
+    GENENAME = GENE
+  ) %>%
+  as.data.frame(stringsAsFactors = FALSE)
+
+# GO table in the exact format AnnotationForge expects
+go_table <- all_go_raw %>%
+  transmute(
+    GID = GENE,
+    GO = GO,
+    EVIDENCE = "IEA"
+  ) %>%
+  distinct() %>%
+  as.data.frame(stringsAsFactors = FALSE)
+
+rownames(gene_info) <- NULL
+rownames(go_table) <- NULL
+
+# Sanity checks
+stopifnot(identical(names(gene_info), c("GID", "SYMBOL", "GENENAME")))
+stopifnot(identical(names(go_table), c("GID", "GO", "EVIDENCE")))
+stopifnot(!anyDuplicated(gene_info$GID))
+stopifnot(all(grepl("^GO:\\d{7}$", go_table$GO)))
+
+# 5. Build package
+# Make a brand new output folder
+pkg_path <- makeOrgPackage(
+  gene_info = gene_info,
+  go = go_table,
+  version = "0.1.0",
+  maintainer = "Hamish Williams <hamishgruff@outlook.com>",
+  author = "Hamish Williams",
+  outputDir = ".",
+  tax_id = "6106",
+  genus = "Actinia",
+  species = "equina",
+  goTable = "go"
+)
+
+# Test if it works, please.............
+install.packages(pkg_path, repos = NULL, type = "source")
+library(org.Aequina.eg.db)
+```
+
+## Cluster
+
+```{r semantic_clustering}
+library(dplyr)
+library(purrr)
+library(cluster)
+library(GOSemSim)
+library(org.Aequina.eg.db) # orgdb w just made
+
+# Build semantic data for each ontology
+sem_bp <- godata(org.Aequina.eg.db, keytype = "GID", ont = "BP", computeIC = FALSE)
+sem_mf <- godata(org.Aequina.eg.db, keytype = "GID", ont = "MF", computeIC = FALSE)
+
+# Get unique GO IDs for one ontology from ORA results
+get_terms <- function(df, go_class) {
+  df %>%
+    mutate(
+      ID = as.character(ID),
+      GO = as.character(GO)
+    ) %>%
+    filter(GO == go_class) %>%
+    pull(ID) %>%
+    unique()
+}
+
+# Build a clean similarity matrix
+make_sim_matrix <- function(terms, sem_data) {
+  sim <- termSim(terms, terms, semData = sem_data, method = "Wang")
+  sim[is.na(sim)] <- 0
+  diag(sim) <- 1
+  sim
+}
+
+# Test candidate k values and score them with silhouette width
+evaluate_k <- function(sim_matrix, k_range = 2:40) {
+  dist_mat <- as.dist(1 - sim_matrix)
+  hc <- hclust(dist_mat, method = "average")
+
+  k_eval <- map_dfr(k_range, function(k) {
+    cl <- cutree(hc, k = k)
+    sil <- silhouette(cl, dist_mat)
+    sizes <- table(cl)
+
+    tibble(
+      k = k,
+      avg_silhouette = mean(sil[, "sil_width"]),
+      n_singletons = sum(sizes == 1),
+      prop_singletons = mean(sizes == 1)
+    )
+  })
+
+  best_k <- k_eval %>%
+    filter(!is.na(avg_silhouette)) %>%
+    slice_max(avg_silhouette, n = 1) %>%
+    pull(k)
+
+  list(hc = hc, k_eval = k_eval, best_k = best_k)
+}
+
+# Extract GO terms by ontology
+bp_terms <- get_terms(ORA_exp1_results, "biological_processes")
+mf_terms <- get_terms(ORA_exp1_results, "molecular_functions")
+
+# Build similarity matrices
+sim_bp <- make_sim_matrix(bp_terms, sem_bp)
+sim_mf <- make_sim_matrix(mf_terms, sem_mf)
+
+# Choose best k separately for BP and MF
+bp_fit <- evaluate_k(sim_bp, k_range = 2:40) # max index
+mf_fit <- evaluate_k(sim_mf, k_range = 2:33) # max index
+
+best_k_bp <- bp_fit$best_k
+best_k_bp
+  # 29
+best_k_mf <- mf_fit$best_k
+best_k_mf
+  # 14
+
+# Optional: inspect k selection
+print(bp_fit$k_eval, n = 50)
+print(mf_fit$k_eval, n = 50)
+
+par(mfrow = c(2,1))
+plot(bp_fit$k_eval$k, bp_fit$k_eval$avg_silhouette, type = "b", main = "bp clusters",
+     xlab = "k-value tested", ylab = "Average silhouette")
+abline(v = 29, lty = "dashed", col = "grey60")
+plot(mf_fit$k_eval$k, mf_fit$k_eval$avg_silhouette, type = "b", main = "mf clusters",
+     xlab = "k-value tested", ylab = "Average silhouette")
+abline(v =14, lty = "dashed", col = "grey60")
+par(mfrow = c(1,1))
+  # WE want to maximise average silhouette since this means the clustering best fits the data
+    # A rough guide:
+    # 
+    # > 0.5 = pretty strong clustering
+    # 0.25 to 0.5 = moderate / usable structure # our clustering seems roughly at a usable level
+    # < 0.25 = weak clustering structure
+    # negative average = poor clustering overall
+
+# save plot for reference:
+{
+png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/k_selection_plots.png", width = 2600, height = 2000, res = 200)
+par(mfrow = c(2,1))
+plot(bp_fit$k_eval$k, bp_fit$k_eval$avg_silhouette, type = "b", main = "bp clusters",
+     xlab = "k-value tested", ylab = "Average silhouette")
+abline(v = 29, lty = "dashed", col = "grey60")
+plot(mf_fit$k_eval$k, mf_fit$k_eval$avg_silhouette, type = "b", main = "mf clusters",
+     xlab = "k-value tested", ylab = "Average silhouette")
+abline(v =14, lty = "dashed", col = "grey60")
+par(mfrow = c(1,1))
+dev.off()
+}
+
+# Cut dendrograms using best k
+bp_clusters <- cutree(bp_fit$hc, k = best_k_bp)
+mf_clusters <- cutree(mf_fit$hc, k = best_k_mf)
+
+# Combine cluster assignments
+term_clusters <- bind_rows(
+  tibble(ID = names(bp_clusters), semantic_cluster = bp_clusters),
+  tibble(ID = names(mf_clusters), semantic_cluster = mf_clusters)
+)
+
+# Join clusters back onto ORA results
+ORA_exp1_results_clustered <- ORA_exp1_results %>%
+  mutate(
+    ID = as.character(ID),
+    GO = as.character(GO),
+    Description_QuickGO = as.character(Description_QuickGO)
+  ) %>%
+  left_join(term_clusters, by = "ID") %>%
+  arrange(GO, semantic_cluster, p.adjust)
+
+# One representative term per cluster = lowest adjusted p-value
+cluster_representatives <- ORA_exp1_results_clustered %>%
+  group_by(GO, semantic_cluster) %>%
+  slice_min(p.adjust, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(GO, semantic_cluster, ID, Description_QuickGO, p.adjust, Count)
+
+print(cluster_representatives, n = 50)
+
+# Final summary table:
+# - singleton terms are kept as-is
+# - clustered terms keep only the best representative
+ORA_exp1_summary_df <- ORA_exp1_results_clustered %>%
+  group_by(GO, semantic_cluster) %>%
+  mutate(cluster_size = n()) %>%
+  arrange(p.adjust, .by_group = TRUE) %>%
+  dplyr::slice(1) %>%
+  ungroup()
+
+print(ORA_exp1_summary_df, n = 50)
+```
+
+## Add LFC data
+
+```{r SC_lfc_attach}
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp1_combined_nested <- ORA_exp1_summary_df %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp1_combined_long <- ORA_exp1_summary_df %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+```
+
+## plot clustered results
+
+```{r plot_clustered_results}
+p_boxes <- ORA_exp1_combined_long %>%
+  mutate(
+    Description_QuickGO = fct_reorder(
+      Description_QuickGO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Description_QuickGO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )
+p_boxes
+```
+
+# Semantically clustering all enrichment analysis results together 
+
+```{r enrichment_results_str}
+# repeat nesting of results to ensure you are using the right data:
+{
+# ora exp1
+ORA_exp1_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_1$log2FoldChange, DE_results_1$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp1_combined_nested <- ORA_exp1_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp1_combined_long <- ORA_exp1_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+
+# ora exp2
+ORA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# Map the LFC values to ORA results using the gene names ----
+# Make a lookup table: gene -> log2FoldChange
+rm(lfc_map)
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+ORA_exp2_combined_nested <- ORA_exp2_results %>%
+  mutate(
+    geneID = as.character(geneID),
+    log2FoldChange = sapply(strsplit(geneID, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+ORA_exp2_combined_long <- ORA_exp2_results %>%
+  mutate(geneID = as.character(geneID)) %>%
+  separate_rows(geneID, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[geneID])
+
+# gsea exp2
+GSEA_exp2_results <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_QuickGO_names.csv",
+                         header = T, 
+                         sep = ',', 
+                         stringsAsFactors = TRUE)
+
+# nested and long versions
+# Make a lookup table: gene -> log2FoldChange
+lfc_map <- setNames(DE_results_2$log2FoldChange, DE_results_2$X)
+
+# Version 1: keep ORA rows intact, add a nested LFC column matching geneID order
+GSEA_exp2_results_nested <- GSEA_exp2_results %>%
+  mutate(
+    core_enrichment = as.character(core_enrichment),
+    log2FoldChange = sapply(strsplit(core_enrichment, "/"), function(genes) {
+      paste(lfc_map[genes], collapse = "/")
+    })
+  )
+# Version 2: long format, one gene per row with its matching LFC
+GSEA_exp2_results_long <- GSEA_exp2_results %>%
+  mutate(core_enrichment = as.character(core_enrichment)) %>%
+  separate_rows(core_enrichment, sep = "/") %>%
+  mutate(log2FoldChange = lfc_map[core_enrichment])
+}
+
+# check packages loaded
+{
+library(dplyr)
+library(purrr)
+library(cluster)
+library(GOSemSim)
+library(org.Aequina.eg.db)
+library(ggVennDiagram)
+}
+  
+# -----------------------------
+# 1. Prepare and combine results
+# -----------------------------
+
+prep_results <- function(df, experiment, method) {
+  df %>%
+    transmute(
+      ID = as.character(ID),
+      Description = as.character(Description),
+      Description_QuickGO = as.character(Description_QuickGO),
+      ontology = as.character(GO),
+      p.adjust = as.numeric(p.adjust),
+      experiment = experiment,
+      method = method
+    ) %>%
+    distinct()
+}
+
+result_list <- list(
+  prep_results(ORA_exp1_combined_nested,  experiment = "exp1", method = "ORA"),
+  prep_results(ORA_exp2_combined_nested,  experiment = "exp2", method = "ORA"),
+  prep_results(GSEA_exp2_results_nested,  experiment = "exp2", method = "GSEA")
+)
+
+all_enrichment_results <- bind_rows(result_list)
+
+# This is the minimal combined enrichment dataframe
+all_enrichment_results_minimal <- all_enrichment_results %>%
+  dplyr::select(ID, Description, Description_QuickGO, ontology, experiment, method, p.adjust)
+
+# -----------------------------
+# 2. Create unique term table for clustering
+#    Keep one row per GO term per ontology
+#    Use the lowest p.adjust across all sources
+# -----------------------------
+
+best_padj <- function(x) {
+  if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
+}
+
+unique_terms <- all_enrichment_results_minimal %>%
+  group_by(ontology, ID) %>%
+  summarise(
+    Description = dplyr::first(Description),
+    Description_QuickGO = dplyr::first(Description_QuickGO),
+    best_p.adjust = best_padj(p.adjust),
+    .groups = "drop"
+  )
+
+# -----------------------------
+# 3. Build semantic similarity data
+# -----------------------------
+
+sem_bp <- godata(org.Aequina.eg.db, keytype = "GID", ont = "BP", computeIC = FALSE)
+sem_mf <- godata(org.Aequina.eg.db, keytype = "GID", ont = "MF", computeIC = FALSE)
+
+make_sim_matrix <- function(term_ids, sem_data) {
+  sim <- termSim(
+    t1 = term_ids,
+    t2 = term_ids,
+    semData = sem_data,
+    method = "Wang"
+  )
+  sim[is.na(sim)] <- 0
+  diag(sim) <- 1
+  sim
+}
+
+fit_semantic_clusters <- function(term_ids, sem_data, max_k = 40) {
+  sim <- make_sim_matrix(term_ids, sem_data)
+  n_terms <- length(term_ids)
+
+  # handle very small term sets
+  if (n_terms == 1) {
+    return(list(
+      sim = sim,
+      hc = NULL,
+      k_eval = tibble(k = 1, avg_silhouette = NA_real_),
+      best_k = 1,
+      clusters = setNames(1, term_ids)
+    ))
+  }
+
+  dist_mat <- as.dist(1 - sim)
+  hc <- hclust(dist_mat, method = "average")
+
+  if (n_terms == 2) {
+    clusters <- cutree(hc, k = 2)
+    return(list(
+      sim = sim,
+      hc = hc,
+      k_eval = tibble(k = 2, avg_silhouette = NA_real_),
+      best_k = 2,
+      clusters = clusters
+    ))
+  }
+
+  k_grid <- 2:min(max_k, n_terms - 1)
+
+  k_eval <- map_dfr(k_grid, function(k) {
+    cl <- cutree(hc, k = k)
+    sil <- silhouette(cl, dist_mat)
+    sizes <- table(cl)
+
+    tibble(
+      k = k,
+      avg_silhouette = mean(sil[, "sil_width"]),
+      n_singletons = sum(sizes == 1),
+      prop_singletons = mean(sizes == 1)
+    )
+  })
+
+  best_k <- k_eval %>%
+    filter(!is.na(avg_silhouette)) %>%
+    slice_max(order_by = avg_silhouette, n = 1, with_ties = FALSE) %>%
+    pull(k)
+
+  clusters <- cutree(hc, k = best_k)
+
+  list(
+    sim = sim,
+    hc = hc,
+    k_eval = k_eval,
+    best_k = best_k,
+    clusters = clusters
+  )
+}
+
+# -----------------------------
+# 4. Fit BP and MF clustering separately
+# -----------------------------
+
+bp_terms <- unique_terms %>%
+  filter(ontology == "biological_processes") %>%
+  pull(ID)
+
+mf_terms <- unique_terms %>%
+  filter(ontology == "molecular_functions") %>%
+  pull(ID)
+
+bp_fit <- fit_semantic_clusters(bp_terms, sem_bp, max_k = 40)
+mf_fit <- fit_semantic_clusters(mf_terms, sem_mf, max_k = 40)
+
+bp_fit$best_k
+  # 31
+mf_fit$best_k
+  # 15
+
+# Optional: inspect the k selection tables
+print(bp_fit$k_eval, n = 50)
+print(mf_fit$k_eval, n = 50)
+
+# Optional: plot k selection
+par(mfrow = c(2, 1))
+
+plot(
+  bp_fit$k_eval$k, bp_fit$k_eval$avg_silhouette,
+  type = "b", main = "BP clusters",
+  xlab = "k tested", ylab = "Average silhouette"
+)
+abline(v = bp_fit$best_k, lty = "dashed", col = "grey60")
+
+plot(
+  mf_fit$k_eval$k, mf_fit$k_eval$avg_silhouette,
+  type = "b", main = "MF clusters",
+  xlab = "k tested", ylab = "Average silhouette"
+)
+abline(v = mf_fit$best_k, lty = "dashed", col = "grey60")
+
+par(mfrow = c(1, 1))
+
+# -----------------------------
+# 5. Assign clusters to each unique GO term
+# -----------------------------
+
+term_clusters <- bind_rows(
+  tibble(
+    ontology = "biological_processes",
+    ID = names(bp_fit$clusters),
+    semantic_cluster = as.integer(bp_fit$clusters)
+  ),
+  tibble(
+    ontology = "molecular_functions",
+    ID = names(mf_fit$clusters),
+    semantic_cluster = as.integer(mf_fit$clusters)
+  )
+)
+
+unique_terms_clustered <- unique_terms %>%
+  left_join(term_clusters, by = c("ontology", "ID"))
+
+# -----------------------------
+# 6. Pick one representative term per cluster
+#    Representative = lowest adjusted p-value
+# -----------------------------
+
+cluster_representatives <- unique_terms_clustered %>%
+  group_by(ontology, semantic_cluster) %>%
+  slice_min(order_by = best_p.adjust, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  transmute(
+    ontology,
+    semantic_cluster,
+    representative_ID = ID,
+    representative_Description = Description,
+    representative_Description_QuickGO = Description_QuickGO
+  )
+
+# Map every term to its representative
+term_to_representative <- unique_terms_clustered %>%
+  left_join(cluster_representatives, by = c("ontology", "semantic_cluster"))
+
+# -----------------------------
+# 7. Replace clustered terms in the combined enrichment results
+# -----------------------------
+
+all_enrichment_results_replaced <- all_enrichment_results_minimal %>%
+  left_join(
+    term_to_representative %>%
+      dplyr::select(
+        ontology, ID,
+        semantic_cluster,
+        representative_ID,
+        representative_Description,
+        representative_Description_QuickGO
+      ),
+    by = c("ontology", "ID")
+  ) %>%
+  mutate(
+    original_ID = ID,
+    original_Description = Description,
+    original_Description_QuickGO = Description_QuickGO,
+    ID = representative_ID,
+    Description = representative_Description,
+    Description_QuickGO = representative_Description_QuickGO
+  ) %>%
+  dplyr::select(
+    experiment, method, ontology,
+    original_ID, original_Description, original_Description_QuickGO,
+    semantic_cluster,
+    ID, Description, Description_QuickGO,
+    p.adjust
+  )
+
+# Remove duplicate representative terms within each experiment/method/ontology
+all_enrichment_results_collapsed <- all_enrichment_results_replaced %>%
+  distinct(experiment, method, ontology, ID, .keep_all = TRUE)
+
+# -----------------------------
+# 8. Make GO sets for overlap analysis
+# -----------------------------
+
+make_go_sets <- function(df, ontology_name) {
+  df %>%
+    filter(ontology == ontology_name) %>%
+    mutate(source = paste(experiment, method, sep = "_")) %>%
+    distinct(source, ID) %>%
+    split(.$source) %>%
+    map(~ .x$ID)
+}
+
+bp_sets <- make_go_sets(all_enrichment_results_collapsed, "biological_processes")
+mf_sets <- make_go_sets(all_enrichment_results_collapsed, "molecular_functions")
+
+# -----------------------------
+# 9. Plot venn diagrams
+# -----------------------------
+
+# options
+names(bp_sets) <- c("Acute ORA", "Primed GSEA", "Primed ORA")
+bp_sets <- bp_sets[c("Acute ORA", "Primed ORA", "Primed GSEA")]
+names(mf_sets) <- c("Acute ORA", "Primed ORA")
+mf_sets <- mf_sets[c("Acute ORA", "Primed ORA")]
+
+p_bp <- ggVennDiagram(
+  bp_sets,
+  category.names = names(bp_sets),
+  set_color = "black",
+      set_size = 3.5,
+  label_alpha = 0,
+  label_size = 6
+) +
+  scale_fill_gradient(low = "white", high = "#4c43e8") +
+  #coord_equal(clip = "off") +
+  #ggtitle("Biological processes") +
+  theme_void(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.margin = margin(20, 30, 20, 30),
+    legend.position = "none"
+  )
+
+p_bp
+
+p_mf <- ggVennDiagram(
+  mf_sets,
+  category.names = names(mf_sets),
+  set_color = "black",
+    set_size = 3.5,
+  label_alpha = 0,
+  label_size = 6
+) +
+  scale_fill_gradient(low = "white", high = "#e8a943") +
+  coord_equal(clip = "off") +
+  #ggtitle("Biological processes") +
+  theme_void(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.margin = margin(20, 25, 20, 25),
+    legend.position = "none"
+  )
+
+p_mf
+
+# Optional: save venn diagrams
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Venn Diagrams/bp_venn_semantic_clusters_diagram.png", p_bp, width = 6, height = 6, dpi = 300)
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Venn Diagrams/mf_venn_semantic_clusters_diagram.png", p_mf, width = 6, height = 6, dpi = 300)
+
+# Capture intersctions ----
+# optional: make nicer source labels
+intersection_df <- all_enrichment_results_collapsed %>%
+  mutate(
+    source = case_when(
+      experiment == "exp1" & method == "ORA"  ~ "Experiment 1 ORA",
+      experiment == "exp2" & method == "ORA"  ~ "Experiment 2 ORA",
+      experiment == "exp2" & method == "GSEA" ~ "Experiment 2 GSEA",
+      TRUE ~ paste(experiment, method)
+    )
+  ) %>%
+  group_by(ontology, ID) %>%
+  summarise(
+    Description = dplyr::first(Description),
+    Description_QuickGO = dplyr::first(Description_QuickGO),
+    groups_intersecting = paste(sort(unique(source)), collapse = " | "),
+    n_groups = n_distinct(source),
+    .groups = "drop"
+  ) %>%
+  filter(n_groups > 1) %>%   # remove non-intersecting terms
+  arrange(ontology, desc(n_groups), ID)
+
+print(intersection_df)
+
+library(dplyr)
+library(gridExtra)
+library(grid)
+
+intersection_table <- intersection_df %>%
+  dplyr::select(ontology, ID, Description_QuickGO, groups_intersecting, n_groups)
+
+tbl <- tableGrob(intersection_table, rows = NULL)
+
+grid.newpage()
+grid.draw(tbl)
+```
+
+## Table of semantic cluster intersections.
+
+```{r}
+library(dplyr) 
+library(stringr) 
+library(gridExtra) 
+library(grid) 
+
+# Clean and relabel table content
+intersection_table_pub <- intersection_df %>% 
+  mutate(ontology = recode(ontology, 
+                           biological_processes = "Biological process", 
+                           molecular_functions = "Molecular function" ), 
+         groups_intersecting = groups_intersecting 
+         %>% str_replace_all("Experiment 1 ORA", 
+                             "Experiment 1 (ORA)") 
+         %>% str_replace_all("Experiment 2 ORA", 
+                             "Experiment 2 (ORA)") %>% 
+           str_replace_all("Experiment 2 GSEA", 
+                           "Experiment 2 (GSEA)") %>% 
+           str_replace_all(" \\| ", ", "), 
+         Description_QuickGO = str_replace_all(Description_QuickGO, "_", " ") ) %>% 
+  transmute( Ontology = ontology, 
+             `GO ID` = ID, 
+             `GO term` = str_wrap(Description_QuickGO, 
+                                  width = 32), 
+             `Shared between` = str_wrap(groups_intersecting, 
+                                         width = 38), 
+             `No. of groups` = n_groups ) %>% 
+  arrange(Ontology, desc(`No. of groups`), 
+          `GO ID`) 
+# Table theme 
+table_theme <- ttheme_minimal( base_size = 10, padding = unit(c(6, 6), "mm"), core = list( fg_params = list(hjust = 0, x = 0.02, fontsize = 10), bg_params = list(fill = c("white", "#F7F7F7"), col = NA) ), colhead = list( fg_params = list(fontface = "bold", fontsize = 10.5, col = "black"), bg_params = list(fill = "#D9D9D9", col = NA) ) ) 
+# Build table 
+
+tbl <- tableGrob( intersection_table_pub, rows = NULL, theme = table_theme ) 
+# Manually widen columns for readability 
+tbl$widths <- unit(c(1.8, 1.1, 3.0, 3.4, 1.0), "in") 
+
+# Draw table 
+grid.newpage() 
+grid.draw(tbl)
+
+
+# Plot venns and table together ----
+# Convert ggplot objects to grobs
+p_bp <- p_bp +
+  theme(
+    plot.margin = margin(20, 5, 20, 10)   # top, right, bottom, left
+  )
+
+p_mf <- p_mf +
+  theme(
+    plot.margin = margin(20, 10, 20, 5)
+  )
+
+bp_grob <- ggplotGrob(p_bp)
+mf_grob <- ggplotGrob(p_mf)
+
+# Layout:
+# row 1 = bp_grob | mf_grob
+# row 2 = tbl spans both columns
+combined_plot <- arrangeGrob(
+  bp_grob,
+  mf_grob,
+  tbl,
+  layout_matrix = rbind(
+    c(1, 2),
+    c(3, 3)
+  ),
+  heights = c(2.2, 1.4)   # adjust this to give more/less room to the table
+)
+
+# Draw combined figure
+grid.newpage()
+grid.draw(combined_plot)
+
+png("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Venn Diagrams/venn_and_intersection_table.png", width = 4200, height = 3000, res = 300)
+grid.draw(combined_plot)
+dev.off()
+```
+
+# Making new figures/plots with semantic cluster data
+
+- Need to add the clustered group names to the original datasets
+  - should be able to achieve this by using the "all_enrichment_results_replaced" df, which contains the semantic representative names in the "Description_QuickGO" column.
+  
+- I'll map them onto the main results dataframes by first changing the name of the column in the replacement file, and then joining them using the GO:IDs as a merging point.
+
+- I should be able to do this with both the nested and long versions of the results files, making it easy to make the supplementary material tables and the main text figures too.
+
+```{r main_text_figures_with_semantic_cluster_representatives}
+# make a new df 
+  # use the "original_ID" column and the "Description_QuickGO" columns
+  # filter for only unique rows
+representative_terms_df <- unique(all_enrichment_results_replaced[c("original_ID", "Description_QuickGO")])
+  # alter column names
+names(representative_terms_df)[names(representative_terms_df) == "original_ID"] <- "ID"
+names(representative_terms_df)[names(representative_terms_df) == "Description_QuickGO"] <- "Representative_GO"
+
+# Now add a new column "representative_GO" to each of the main results dfs:
+ORA_exp1_combined_long_semantic <- merge(
+  ORA_exp1_combined_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+ORA_exp2_combined_long_semantic <- merge(
+  ORA_exp2_combined_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+GSEA_exp2_results_long_semantic <- merge(
+  GSEA_exp2_results_long,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+# make plot with representative terms
+# ORA plot ----
+library(dplyr)
+library(forcats)
+library(ggplot2)
+library(stringr)
+
+# combine exp1 + exp2
+ORA_combined_compare <- bind_rows(
+  ORA_exp1_combined_long_semantic %>%
+    mutate(Experiment = "Exp1"),
+  ORA_exp2_combined_long_semantic %>%
+    mutate(Experiment = "Exp2")
+)
+
+p_boxes_compare <- ORA_combined_compare %>%
+  mutate(
+    Representative_GO = fct_reorder(
+      Representative_GO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Representative_GO,
+    fill = Experiment,
+    colour = Experiment
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    alpha = 0.5,
+    position = "identity"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL,
+    fill = "Experiment"
+  ) +
+  scale_y_discrete(labels = \(x) str_wrap(x, width = 45)) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) +
+  facet_wrap(
+    ~GO,
+    scales = "free",
+    labeller = labeller(
+      GO = c(
+        biological_processes = "Biological Processes",
+        molecular_functions = "Molecular Functions"
+      )
+    )
+  ) + 
+  scale_fill_manual(values = c("Exp1" = "#4C78A8", "Exp2" = "#E45756")) + 
+  scale_colour_manual(values = c("Exp1" = "#14467d", "Exp2" = "#bd1f1e"))
+
+p_boxes_compare
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/ORA_semantically_clustered_enrichment_plot.png", p_boxes_compare, width = 12, height = 8, dpi = 300)
+
+
+# GSEA plot ----
+p_boxes <- GSEA_exp2_results_long_semantic %>%
+  mutate(
+    Representative_GO = fct_reorder(
+      Representative_GO,
+      log2FoldChange,
+      .fun = median,
+      .na_rm = TRUE
+    )
+  ) %>%
+  ggplot(aes(
+    x = log2FoldChange,
+    y = Representative_GO
+  )) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey60"
+  ) +
+  geom_boxplot(
+    width = 0.7,
+    outlier.size = 1.5,
+    outlier.alpha = 0.8,
+    linewidth = 0.40,
+    colour = "grey20",
+    fill = "grey90"
+  ) +
+  labs(
+    x = "log2 fold-change (LFC) - Ashr Shrunk",
+    y = NULL
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(colour = "black"),
+    axis.line = element_line(linewidth = 0.5),
+    plot.margin = margin(5.5, 8, 5.5, 5.5)
+  ) + 
+  facet_wrap(~GO, scales = "free",
+             labeller = labeller(
+               GO = c(
+                 biological_processes = "Biolocial Processes",
+                 molecular_functions = "Molecular Functions"
+               )
+             )
+            )+
+  coord_cartesian(xlim = c(-0.004, 0.004)) +
+  scale_x_continuous(breaks = seq(-0.004, 0.004, by = 0.001))
+
+p_boxes
+
+```
+
+## Make nested dataframes to save with representative GO terms:
+
+```{r save_semantic_clusters_enrichment_results}
+# Now add a new column "representative_GO" to each of the main results dfs:
+ORA_exp1_combined_nested_semantic <- merge(
+  ORA_exp1_combined_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+ORA_exp2_combined_nested_semantic <- merge(
+  ORA_exp2_combined_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+GSEA_exp2_results_nested_semantic <- merge(
+  GSEA_exp2_results_nested,
+  representative_terms_df[, c("ID", "Representative_GO")],
+  by = "ID",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+# save dataframes
+  # then save as excel files and modify for use in suppllementary materials
+write.csv(ORA_exp1_combined_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp1_combined_nested_semantic.csv", row.names = FALSE)
+
+write.csv(ORA_exp2_combined_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/ORA_exp2_combined_nested_semantic.csv", row.names = FALSE)
+
+write.csv(GSEA_exp2_results_nested_semantic, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/GSEA_exp2_results_nested_semantic.csv", row.names = FALSE)
+
+```
+
+
+
+### saving DEGS lists for blastp analysis
+
+```{r}
+DE_results_1 <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv",
+  header = TRUE,
+  sep = ",",
+  stringsAsFactors = FALSE
+)
+
+DE_results_2 <- read.table(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv",
+  header = TRUE,
+  sep = ",",
+  stringsAsFactors = FALSE
+)
+
+## Perform naming transformation to make gene IDs matching ----
+DE_results_1$X <- gsub("\\.TU", "", DE_results_1$X) # Removing "TU" part of names
+DE_results_1$X <- gsub("path", "mrna", DE_results_1$X) # Replacing "path" -> "mrna"
+DE_results_2$X <- gsub("\\.TU", "", DE_results_2$X) # Removing "TU" part of names
+DE_results_2$X <- gsub("path", "mrna", DE_results_2$X) # Replacing "path" -> "mrna"
+
+# DEGs list for experiment 1
+DEGs <- DE_results_1[DE_results_1$padj < 0.1, ]
+DEGs <- DEGs[complete.cases(DEGs), ]
+DEGs_1 <- as.vector(DEGs[, 1])
+length(DEGs_1)
+
+write.table(
+  DEGs_1,
+  file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEGs_1.txt",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+# DEGs list for experiment 2
+DEGs <- DE_results_2[DE_results_2$padj < 0.1, ]
+DEGs <- DEGs[complete.cases(DEGs), ]
+DEGs_2 <- as.vector(DEGs[, 1])
+length(DEGs_2)
+
+write.table(
+  DEGs_2,
+  file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEGs_2.txt",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+```

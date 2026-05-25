@@ -1,0 +1,12 @@
+evm.utg82.23
+evm.utg92.58
+evm.utg107.37
+evm.utg178.50
+evm.utg715.41
+evm.utg1051.74
+evm.utg1205.143.145
+evm.utg1432.30
+evm.utg2099.78
+evm.utg3013.18
+evm.utg3872.21
+evm.utg4567.7

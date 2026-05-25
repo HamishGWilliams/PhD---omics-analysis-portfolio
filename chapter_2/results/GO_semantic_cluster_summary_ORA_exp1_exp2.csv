@@ -1,0 +1,71 @@
+"ontology","semantic_cluster_id","semantic_cluster_GO","semantic_cluster_Description","cluster_size"
+"BP","BP_1","GO:0016070","RNA metabolic process",9
+"BP","BP_10","GO:0006659","phosphatidylserine biosynthetic process",1
+"BP","BP_11","GO:0055085","transmembrane transport",5
+"BP","BP_12","GO:0007155","cell adhesion",3
+"BP","BP_13","GO:1901987","regulation of cell cycle phase transition",2
+"BP","BP_14","GO:0007411","axon guidance",1
+"BP","BP_15","GO:0010571","positive regulation of nuclear cell cycle DNA replication",1
+"BP","BP_16","GO:0016310","phosphorylation",1
+"BP","BP_17","GO:0070593","dendrite self-avoidance",2
+"BP","BP_18","GO:0030198","extracellular matrix organization",1
+"BP","BP_19","GO:1904294","positive regulation of ERAD pathway",2
+"BP","BP_2","GO:0007154","cell communication",3
+"BP","BP_20","GO:0030574","collagen catabolic process",1
+"BP","BP_21","GO:0034765","regulation of monoatomic ion transmembrane transport",1
+"BP","BP_22","GO:0042254","ribosome biogenesis",1
+"BP","BP_23","GO:0042981","regulation of apoptotic process",1
+"BP","BP_24","GO:0045087","innate immune response",2
+"BP","BP_25","GO:0046931","pore complex assembly",2
+"BP","BP_26","GO:0050896","response to stimulus",2
+"BP","BP_27","GO:0051715","cytolysis in another organism",1
+"BP","BP_28","GO:0060271","cilium assembly",1
+"BP","BP_29","GO:0070202","regulation of establishment of protein localization to chromosome",1
+"BP","BP_3","GO:0001732","formation of cytoplasmic translation initiation complex",1
+"BP","BP_30","GO:0070507","regulation of microtubule cytoskeleton organization",1
+"BP","BP_31","GO:2000036","regulation of stem cell population maintenance",1
+"BP","BP_4","GO:0001822","kidney development",2
+"BP","BP_5","GO:0006508","proteolysis",3
+"BP","BP_6","GO:0030261","chromosome condensation",2
+"BP","BP_7","GO:0045944","positive regulation of transcription by RNA polymerase II",3
+"BP","BP_8","GO:0006468","protein phosphorylation",4
+"BP","BP_9","GO:0006635","fatty acid beta-oxidation",2
+"MF","MF_1","GO:0000166","nucleotide binding",5
+"MF","MF_10","GO:0003964","RNA-directed DNA polymerase activity",2
+"MF","MF_11","GO:0004721","phosphoprotein phosphatase activity",3
+"MF","MF_12","GO:0004100","chitin synthase activity",1
+"MF","MF_13","GO:0004197","cysteine-type endopeptidase activity",4
+"MF","MF_14","GO:0004300","enoyl-CoA hydratase activity",1
+"MF","MF_15","GO:0004402","histone acetyltransferase activity",1
+"MF","MF_16","GO:0004540","RNA nuclease activity",1
+"MF","MF_17","GO:0102148","N-acetyl-beta-D-galactosaminidase activity",3
+"MF","MF_18","GO:0004674","protein serine/threonine kinase activity",3
+"MF","MF_19","GO:0061630","ubiquitin protein ligase activity",2
+"MF","MF_2","GO:0000215","tRNA 2-phosphotransferase activity",1
+"MF","MF_20","GO:0004867","serine-type endopeptidase inhibitor activity",1
+"MF","MF_21","GO:0004930","G protein-coupled receptor activity",1
+"MF","MF_22","GO:0005044","scavenger receptor activity",1
+"MF","MF_23","GO:0005085","guanyl-nucleotide exchange factor activity",1
+"MF","MF_24","GO:0005245","voltage-gated calcium channel activity",3
+"MF","MF_25","GO:0046872","metal ion binding",3
+"MF","MF_26","GO:0008017","microtubule binding",1
+"MF","MF_27","GO:0008201","heparin binding",1
+"MF","MF_28","GO:0008483","transaminase activity",2
+"MF","MF_29","GO:0015267","channel activity",2
+"MF","MF_3","GO:0003899","DNA-directed 5-3 RNA polymerase activity",3
+"MF","MF_30","GO:0051213","dioxygenase activity",2
+"MF","MF_31","GO:0016874","ligase activity",1
+"MF","MF_32","GO:0030247","polysaccharide binding",1
+"MF","MF_33","GO:0031267","small GTPase binding",1
+"MF","MF_34","GO:0046983","protein dimerization activity",3
+"MF","MF_35","GO:0043539","protein serine/threonine kinase activator activity",1
+"MF","MF_36","GO:0098632","cell-cell adhesion mediator activity",2
+"MF","MF_37","GO:0090729","toxin activity",1
+"MF","MF_38","GO:0106245","L-serine-phosphatidylethanolamine phosphatidyltransferase activity",1
+"MF","MF_39","GO:0140297","DNA-binding transcription factor binding",1
+"MF","MF_4","GO:0003676","nucleic acid binding",7
+"MF","MF_5","GO:0003712","transcription coregulator activity",1
+"MF","MF_6","GO:0003724","RNA helicase activity",2
+"MF","MF_7","GO:0003755","peptidyl-prolyl cis-trans isomerase activity",1
+"MF","MF_8","GO:0003857","3-hydroxyacyl-CoA dehydrogenase activity",1
+"MF","MF_9","GO:0003884","D-amino-acid oxidase activity",1

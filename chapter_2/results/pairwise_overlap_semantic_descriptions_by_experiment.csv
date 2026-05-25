@@ -1,0 +1,7 @@
+"set_1","set_2","n_overlap","semantic_description"
+"Acute Methylation","Acute Expression",2,"D-amino-acid oxidase activity; protein dimerization activity"
+"Acute Methylation","Primed Methylation",24,"cell adhesion; cell communication; cysteine-type endopeptidase activity; D-amino-acid oxidase activity; dendrite self-avoidance; fatty acid beta-oxidation; kidney development; metal ion binding; N-acetyl-beta-D-galactosaminidase activity; nucleic acid binding; nucleotide binding; positive regulation of ERAD pathway; protein dimerization activity; protein phosphorylation; protein serine/threonine kinase activity; proteolysis; regulation of cell cycle phase transition; regulation of monoatomic ion transmembrane transport; RNA-directed DNA polymerase activity; RNA metabolic process; transaminase activity; transmembrane transport; ubiquitin protein ligase activity; voltage-gated calcium channel activity"
+"Acute Methylation","Primed Expression",0,""
+"Acute Expression","Primed Methylation",4,"cilium assembly; D-amino-acid oxidase activity; G protein-coupled receptor activity; protein dimerization activity"
+"Acute Expression","Primed Expression",1,"G protein-coupled receptor activity"
+"Primed Methylation","Primed Expression",1,"G protein-coupled receptor activity"

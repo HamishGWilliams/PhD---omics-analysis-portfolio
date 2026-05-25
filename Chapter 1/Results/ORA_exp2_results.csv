@@ -1,0 +1,8 @@
+"ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count","GO"
+"GO:0009755","hormone-mediated signaling pathway",0.5,0.001767029311898,0.00353099734852491,0.0105929920455747,NA,"evm.utg3013.18",1,"biological_processes"
+"GO:0000209","protein polyubiquitination",0.5,0.0106714711385212,0.0212294277889954,0.026159305485334,NA,"evm.utg92.58",1,"biological_processes"
+"GO:0043161","proteasome-mediated ubiquitin-dependent protein catabolic process",0.5,0.0131661007553184,0.026159305485334,0.026159305485334,NA,"evm.utg92.58",1,"biological_processes"
+"GO:0016500","protein-hormone receptor activity",0.2,0.000926971988065236,0.0046265426842621,0.0095416914334483,NA,"evm.utg3013.18",1,"molecular_functions"
+"GO:0061659","ubiquitin-like protein ligase activity",0.2,0.000955939862692274,0.00477084571672415,0.0095416914334483,NA,"evm.utg92.58",1,"molecular_functions"
+"GO:0030414","peptidase inhibitor activity",0.2,0.00431621331942875,0.0213968009609795,0.0285290679479727,NA,"evm.utg3872.21",1,"molecular_functions"
+"GO:0005201","extracellular matrix structural constituent",0.2,0.00657570754033777,0.0324508277922669,0.0324508277922669,NA,"evm.utg3872.21",1,"molecular_functions"

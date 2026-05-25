@@ -1,0 +1,33 @@
+set_1,set_2,n_overlap,semantic_description
+Acute Expression,Primed Expression,1,G protein-coupled receptor activity
+Acute Expression,Acute Methylation,2,D-amino-acid oxidase activity
+Acute Expression,Acute Methylation,2,protein dimerization activity
+Acute Expression,Primed Methylation,4,cilium assembly
+Acute Expression,Primed Methylation,4,D-amino-acid oxidase activity
+Acute Expression,Primed Methylation,4,G protein-coupled receptor activity
+Acute Expression,Primed Methylation,4,protein dimerization activity
+Primed Expression,Primed Methylation,1,G protein-coupled receptor activity
+Acute Methylation,Primed Methylation,24,cell adhesion
+Acute Methylation,Primed Methylation,24,cell communication
+Acute Methylation,Primed Methylation,24,cysteine-type endopeptidase activity
+Acute Methylation,Primed Methylation,24,D-amino-acid oxidase activity
+Acute Methylation,Primed Methylation,24,dendrite self-avoidance
+Acute Methylation,Primed Methylation,24,fatty acid beta-oxidation
+Acute Methylation,Primed Methylation,24,kidney development
+Acute Methylation,Primed Methylation,24,metal ion binding
+Acute Methylation,Primed Methylation,24,N-acetyl-beta-D-galactosaminidase activity
+Acute Methylation,Primed Methylation,24,nucleic acid binding
+Acute Methylation,Primed Methylation,24,nucleotide binding
+Acute Methylation,Primed Methylation,24,positive regulation of ERAD pathway
+Acute Methylation,Primed Methylation,24,protein dimerization activity
+Acute Methylation,Primed Methylation,24,protein phosphorylation
+Acute Methylation,Primed Methylation,24,protein serine/threonine kinase activity
+Acute Methylation,Primed Methylation,24,proteolysis
+Acute Methylation,Primed Methylation,24,regulation of cell cycle phase transition
+Acute Methylation,Primed Methylation,24,regulation of monoatomic ion transmembrane transport
+Acute Methylation,Primed Methylation,24,RNA-directed DNA polymerase activity
+Acute Methylation,Primed Methylation,24,RNA metabolic process
+Acute Methylation,Primed Methylation,24,transaminase activity
+Acute Methylation,Primed Methylation,24,transmembrane transport
+Acute Methylation,Primed Methylation,24,ubiquitin protein ligase activity
+Acute Methylation,Primed Methylation,24,voltage-gated calcium channel activity

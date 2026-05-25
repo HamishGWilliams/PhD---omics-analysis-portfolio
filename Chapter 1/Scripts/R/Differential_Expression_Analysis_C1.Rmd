@@ -1,0 +1,1139 @@
+---
+title: "Differential_Expression_Analysis_C1"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.width = 8,  # Set default plot width
+  fig.height = 6,  # Set default plot height
+  dev = "png",
+  echo = T,
+  warning = F,
+  error = F# Set default device to PNG for Word compatibility
+)
+
+# Specify the default figure size for the whole document
+options(
+  repr.plot.width = 6,  # Set default plot width
+  repr.plot.height = 4.5  # Set default plot height
+)
+```
+
+# Outline of Document
+
+This document will serve as a culmination of all of the relevant methods and results relating specifically to the RNA-seq and DESeq2 analyses performed on both experiment 1 & 2 data. I aim to write this document as a type of "scientific journal", which will be more formal and written as a draft type of word document that will be integrated into the main chapter(s) document(s).
+
+I will write each section as it appears, explaining in more detail the steps taken and the thought processes behind it. Initially I'll write the sections as they appear in the initial markdown script, but may gradually change and edit the sections to be split more clearly into an overarching methods and results section.
+
+# Set-up
+
+There are several steps necessary before starting the analyses from my script. This includes:
+
+-   Installing and Loading packages
+-   Loading Required Data
+
+## Installing & Loading Packages
+
+There are over a dozen packages used for this stage of the analyses, and as such, it can be a little tedious to have to manually install and load all of the required packages needed. Here, I have created a custom function which will check if the packages in the required list are installed or not, install them through the normal means (or via Biocmanager where applicable), and the subsequently load th packages into R. We repeat the function on our package list to ensure that all of the packages are installed and loaded correctly.
+
+```{r Install_and_Load_Packages, warning=F, message=F}
+# Create function to check a package list
+  # This function will install bioconductor packages also without needing to do the whole BiocManager::install(...), which is nice
+check_packages <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      
+      # Check if the package requires BiocManager
+      if (pkg %in% c("gage", "RUVSeq", "gprofiler2","DESeq2","PCAtools", "ComplexHeatmap")) {
+        if (!require("BiocManager", quietly = TRUE)) {
+          install.packages("BiocManager")
+          BiocManager::install(version = "3.17")
+        }
+        BiocManager::install(pkg, force = TRUE)
+      } else {
+        install.packages(pkg)
+      }
+      
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+# Generate a package list: 
+pkg_list<-c("tidyverse", #manipulation
+            "DESeq2", # main differential expression analysis tool
+            "tibble", # tables
+            "stats", # stats
+            "ggplot2", # plotting
+            "pheatmap", # plotting
+            "dplyr", # manipulation 
+            "tidyr", # manipulation
+            "ggfortify", #plotting
+            "corrplot", # plotting
+            "gprofiler2", #
+            "knitr", # manipulation
+            "ggforce", # pltting
+            "gridExtra", # plotting
+            "ggrepel", # plotting
+            "VennDiagram", # plotting
+            "ggVennDiagram", # plotting
+            "PCAtools", # plotting
+            "cowplot", # plotting
+            "apeglm", # LFC shrinking method option
+            "EnhancedVolcano", # plotting
+            "ashr", # LFC shrinking method option
+            "ComplexHeatmap",
+            "RColorBrewer"
+            ) # plotting
+
+# Execute function:
+check_packages(pkg_list)
+```
+# Import Data
+
+We need A couple of different Data files to begin our analyses. These data files include:
+
+## 1. Count Data
+
+-   This Data is the raw output data from our featureCounts script from the HPC UNIX system. It is essentially a very large file which contains count data for genes in the *Actinia equina* genome where they are aligned to a high proportion.
+-   We separate this data into their experimental groups, as the analyses needs to be completed separately. I have perhaps performed this separation early, which bulks the code slightly, however I think having a separated working script makes things easier to keep track of.
+
+## 2. ColData file
+
+-   This is a=our experimental conditions file. It is a small file which should primarily contain the sample IDs (consistent with the Count Data), and also the categorical variables in which the experiment was completed (*i.e. Control vs Treatment, Experiment 1 vs. Experiment 2*).
+-   Again, separating this file so that we can work on our two experimental data sets separately.
+
+```{r Import_Data}
+# Import Count Data
+getwd()
+  # .rmd file is in .../Chapter 1/Scripts/
+counts <- as.matrix(read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/A_Equina_Counts_redo.tsv", header = T, sep = '\t'))
+# Extract Counts only data
+Counts_only <- subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length))
+# Subset counts data into each experiment group:
+counts_exp1 <- subset(counts[,c(1:5,6:12,27:33)])
+counts_exp2<- subset(counts[,c(1:5,13:26)])
+
+# Import colData
+colData <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Data/colData.tsv", header = T, sep = '\t', 
+                      stringsAsFactors = TRUE)
+# Subset into Experiment groups:
+colData_exp1 <- subset(colData[c(1:7,22:28),])
+colData_exp2<- subset(colData[8:21,])
+```
+
+# Processing the Raw Data
+
+Before any analyses is performed from our data, we need to process it to an extent so that we can extract useful information from our Count data, as well as performing some diagnostic analyses on our dataset.
+
+We are going to generate several new data frames and vectors in order to do this, which includes:
+
+## 1.  CPM - Counts per Million
+
+-   A normalization method used to scale the raw counts to account for differences in library size or sequencing depth between samples.
+-   Calculated by taking raw counts for each gene, dividing by the total number of counts in the sample. then multiplying by one million.
+
+$$
+    \text{CPM}_{ij} = \left( \frac{\text{Count}_{ij}}{\text{Library size}_j} \right) \times 10^6
+$$
+
+```{r CPM}
+# Apply CPM Formula
+cpm <- {apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+                function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+cpm_exp1 <- {apply(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+cpm_exp2 <- {apply(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+
+# add back row.names information
+counts_rownames <- as.vector(row.names(counts))
+rownames(cpm) <- counts_rownames
+rownames(cpm_exp1) <- counts_rownames
+rownames(cpm_exp2) <- counts_rownames
+
+# Check Values
+colSums(cpm) # = 10^6 for ALL
+colSums(cpm_exp1) # = 10^6 for ALL
+colSums(cpm_exp2) # = 10^6 for ALL
+```
+
+## 2.  Gene Lengths
+
+-   A simple extraction where we obtain the lengths of the genes.
+
+```{r GeneLengths}
+geneLengths <- as.vector(subset(counts, select = c(Length)))
+geneLengths <- as.vector(as.numeric(geneLengths))
+```
+
+## 3.  RPKM - Reads Per Kilobase Million (mapped reads)
+
+-   A normalization method used to normalize gene expression levels based on both the length of the gene and the total number of mapped reads in the sample.
+
+$$
+RPKM_{ij} = \frac{10^9 \times \text{Read count}_{ij}}{\text{Gene length}_i \times \text{Total mapped reads}_j} 
+$$
+
+```{r RPKM}
+rpkm <- apply(X = subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)),
+                 MARGIN = 2, 
+                 FUN = function(x) {
+                   10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+                 })
+rpkm_exp1 <- apply(X = subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)),
+               MARGIN = 2, 
+               FUN = function(x) {
+                 10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+               })
+rpkm_exp2 <- apply(X = subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)),
+               MARGIN = 2, 
+               FUN = function(x) {
+                 10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+               })
+
+# Add back row names
+rownames(rpkm) <- counts_rownames
+rownames(rpkm_exp1) <- counts_rownames
+rownames(rpkm_exp2) <- counts_rownames
+
+# Check values
+colSums(rpkm) # Different values
+colSums(rpkm_exp1) # Different values
+colSums(rpkm_exp2) # Different values
+```
+
+## 4.  RPK - Reads Per Kilobase
+
+-   A non-standard term used in RNA-seq. Mainly used to calculate the TPM after.
+
+$$
+RPK_{ij} = \frac{\text{Read count}_{ij}}{(\frac{\text{Gene length}_i}{1000})}
+$$
+
+```{r RPK}
+rpk <- apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+                 function(x) as.numeric(x)/(geneLengths/1000))
+
+rpk_exp1 <- apply(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/(geneLengths/1000))
+
+rpk_exp2 <- apply(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/(geneLengths/1000))
+
+# Add back row names
+rownames(rpk) <- counts_rownames
+rownames(rpk_exp1) <- counts_rownames
+rownames(rpk_exp2) <- counts_rownames
+```
+
+## 5.  TPM - Transcripts per Million
+
+-   Normalization method designed to provide a measure of gene expression that accounts for both the length of the gene and the total number of transcripts in the sample.\
+-   mainly useful for comparing gene expression levels between samples or conditions
+
+$$
+\text{TPM}_{ij} = \left( \frac{\text{Transcript count}_{ij}}{\text{Gene length}_i} \right) \times \left( \sum_{k=1}^n \frac{\text{Transcript count}_{kj}}{\text{Gene length}_k} \right)^{-1} \times 10^6
+$$
+
+```{r TPM}
+tpm <- apply(rpk, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+tpm_exp1 <- apply(rpk_exp1, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+tpm_exp2 <- apply(rpk_exp2, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+
+# Row names
+rownames(tpm) <- counts_rownames
+rownames(tpm_exp1) <- counts_rownames
+rownames(tpm_exp2) <- counts_rownames
+
+# Check Values
+colSums(tpm) # = 10^6 for ALL
+colSums(tpm_exp1) # = 10^6 for ALL
+colSums(tpm_exp2) # = 10^6 for ALL
+```
+
+## 6.  Variance
+
+-   A simple calculation of the variance of a given dataframe or set of values. - in this instance, we use the TPM values to get an idea of our variance.
+
+$$
+V_i = \text{var}(\text{tpm}_{i1}, \text{tpm}_{i2}, \ldots, \text{tpm}_{in})
+$$
+
+```{r Variance}
+V <- apply(tpm, 1, var)
+V_exp1 <- apply(tpm_exp1, 1, var)
+write.csv(V_exp1, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Intermediary Files/variance_exp1.csv")
+V_exp2 <- apply(tpm_exp2, 1, var)
+write.csv(V_exp2, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Intermediary Files/variance_exp2.csv")
+```
+
+## 7.  Subset data frames for Diagnostics
+
+-   We use the top 100 most variable genes in the genome to run some diagnostic plots to get an idea of how our data is structured and how the raw data is presented.
+-   From this we can determine some initial thoughts about what patterns seems to emerge, identify potential covariance with treatments or variables, and draw PCA plots of our pre-Differential-expression-data.
+
+```{r top_100_genes}
+# Subset the top 100 most variable genes for generating diagnostic plots
+selectedGenes <- names(V[order(V, decreasing = T)][1:100])
+selectedGenes_exp1 <- names(V_exp1[order(V_exp1, decreasing = T)][1:100])
+selectedGenes_exp2 <- names(V_exp2[order(V_exp2, decreasing = T)][1:100])
+```
+
+# Diagnostic Plots
+
+Now that we have the initial data processed and calculated some parameters, we can begin to explore the Count and colData files to identify related-ness and co-linearlity from our samples and treatment groups.
+
+## Heatmap
+
+We can plot a heatmap of our top 100 most variable genes annotated with our **colData**, using this we can start to explore potential patterns in our samples between treatments.
+
+```{r Heatmap}
+# remove redundant columns from colData
+colData_heatmap <- subset(colData[,-c(1,2,4,5,6)])
+colData_heatmap_exp1 <- subset(colData_heatmap[c(1:7,22:28),])
+colData_heatmap_exp2<- subset(colData_heatmap[8:21,])
+# annotation colours
+ann_colours <- list(Group = c("X" = "grey",
+                              "A" = "red",
+                              "B" = "blue",
+                              "C" = "green"),
+                    Clone = c("Clone10" = "pink",
+                              "Clone11" = "red",
+                              "Clone15" = "orange",
+                              "Clone16" = "yellow2",
+                              "Clone2" = "yellow4",
+                              "Clone5" = "lightgreen",
+                              "Clone9" = "green",
+                              "Clone6" = "green4",
+                              "Clone12" = "turquoise",
+                              "Clone14" = "lightblue4",
+                              "Clone20" = "lightblue",
+                              "Clone3" = "blue",
+                              "Clone19" = "violet",
+                              "Clone8" = "purple"))
+
+# plot
+pheatmap(tpm[selectedGenes,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+
+# save
+out_dir <- "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Figures/Heatmaps"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dev.copy(png, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Figures/Heatmaps/heatmap_all_samples.png")
+dev.off()
+
+# heatmap of acute experiment only
+pheatmap(tpm_exp1[selectedGenes_exp1,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap_exp1,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+dev.copy(png, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Figures/Heatmaps/heatmap_acute_only.png")
+dev.off()
+
+# heatmap of primed xperiment
+pheatmap(tpm_exp2[selectedGenes_exp2,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData_heatmap_exp2,
+         clustering_method = 'ward.D',
+         clustering_distance_cols = 'euclidean',
+         clustering_distance_rows = 'euclidean',
+         border_color = "black",
+         number_color = "black",
+         fontsize_number = 8,
+         col = brewer.pal(10, 'RdYlGn'),
+         cutree_rows = 2, cutree_cols = 4,
+         annotation_colors = ann_colours,
+         legend_breaks = c(-4, 0, 4), # legend customisation
+         legend_labels = c("Low", "Medium", "High") # legend customisation
+         )
+
+# Save the Image
+dev.copy(png, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Figures/Heatmaps/heatmap_primed_only.png")
+dev.off()
+```
+
+## PCA plots
+
+We can also plot a PCA plot of our Transcript per million parameter, which will give us an idea of samples which are more *related* than to others.
+
+We can do this by first performing a quick transformation of the data, **log**-ing the data (log2) then running a PCA.
+
+```{r PCA_plots, fig.width = 20}
+# transpose the matrix 
+M <- t(tpm[selectedGenes,])
+# transform the counts to log2 scale 
+M <- log2(M + 1)
+# compute PCA 
+pcaResults <- prcomp(M)
+
+# Transform to plot with ggplot2
+pca_results_subset <- as.data.frame(pcaResults$x[,c(1:2)])
+pca_results_subset <- pca_results_subset %>% rownames_to_column(var = "sample")
+colData2 <- colData %>% rownames_to_column(var = "sample")
+merged_df <- merge(pca_results_subset, colData2, by = "sample")
+pca_var_exp <- summary(pcaResults)$importance[2,]
+
+pca_plot1 <- ggplot(data = merged_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group),size = 3)  +
+  geom_mark_hull(concavity = 10, expand = 0, radius = 0, aes(fill = Group)) +
+  labs(
+    x = paste("Principal Component 1 (", round(pca_var_exp[1]*100, 2), "%)",
+              sep = ""),
+    y = paste("Principal Component 2 (", round(pca_var_exp[2]*100, 2), "%)",
+              sep = ""),
+    title = "PCA Result"
+  ) +  # Legend title
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)
+  )
+
+pca_plot2 <- ggplot(data = merged_df, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group), size = 3)  +
+  geom_mark_hull(concavity = 10, expand = 0, radius = 0, aes(fill = Group)) +
+  labs(
+    x = paste("Principal Component 1 (", round(pca_var_exp[1]*100, 2), "%)",
+              sep = ""),
+    y = paste("Principal Component 2 (", round(pca_var_exp[2]*100, 2), "%)",
+              sep = ""),
+    title = "PCA Result - Separated"
+  ) +  # Legend title
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)
+  ) +
+  facet_wrap(~Group)
+
+grid.arrange(pca_plot1, pca_plot2, ncol = 2)
+
+dev.copy(png, file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1//Results/Figures/PCA plots/PCA_plot_1.png")
+dev.off()
+```
+
+We can see that many of the samples are overlapping in terms of their positions on the PCA plot. An interesting observation is that they all possess a "tail" which protrudes negatively along the y-axis. They all seem similar in this sense.
+
+This is likely due to the fact that we have not accounted for the clone grouping yet, as this is a clear co-linear variable in our data which has not been accounted for at this point yet.
+
+# Differential EXpression Analysis
+
+Now we come onto the main event, the **Differential Expression Analyses**, brought to us by the loevly **DESeq2** package. There are a number of other packages available to perform the sample analyses, such as:
+
+-   **edgeR**
+-   **limma**
+-   **voom**
+-   **SVA**
+-   **tximport**
+
+We are using DESeq2 here becuase it is widely used for RNA-seq experiment data, in addition to being one of the main packages available with online tools and examples that clearly explain how to perform this analyses, such as:
+
+[Bioconductor](https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html)
+
+[compgenomr](https://compgenomr.github.io/book/)
+
+Before we begin our analyses, we need to tell R what the design of our experiment is, that way it knows what we are contrasting against one another when performing our analyses.
+
+Its important to carefully think about your experiment design, as it can greatly impact your analyses. You should always try to prioritize your co-linear variables first. In this case, we are going to therefore put **Clone** as our first term, which will tell R and DESeq2 to account for this before we start to contrast between our **Groups**, which are our **Treatments**.
+
+$designFormula <- "~ Clone + Group"$
+
+```{r DesignFormula}
+designFormula <- "~ Clone + Group"
+```
+
+```{r CountData}
+# We perform another subsetting of our data here because we removed some of this key information before when running our diagnostics calculating our parameters.
+
+# Remove the 'width' column
+countData <- as.matrix(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)))
+countData_exp1 <- as.matrix(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)))
+countData_exp2 <- as.matrix(subset(counts_exp2, select = c(-Chr,-Start,-End,-Strand,-Length)))
+
+# Here we tell R to make sure that it reads our data as numeric, as I had issues with this previously
+{apply(countData, 2, as.numeric)
+sapply(countData, as.numeric)
+class(countData) <- "numeric"
+storage.mode(countData) <- "numeric"}
+
+{apply(countData_exp1, 2, as.numeric)
+  sapply(countData_exp1, as.numeric)
+  class(countData_exp1) <- "numeric"
+  storage.mode(countData_exp1) <- "numeric"}
+
+{apply(countData_exp2, 2, as.numeric)
+  sapply(countData_exp2, as.numeric)
+  class(countData_exp2) <- "numeric"
+  storage.mode(countData_exp2) <- "numeric"}
+```
+
+## Experiment 1
+
+We will begin the Analyses by Analysing Experiment 1, and then moving onto looking at Experiment 2 later. For both analyses we will be performing the same steps for fair comparison.
+
+The first step is to run the analyses is to build an initial matrix using $DESeqDataSetFromMatrix()$, then removing genes which offer no information (*i.e. NAs*), then running the Analyses using $DESeq$
+
+### Identifying outlier
+
+From analysing the data, I already know there is an outlier, but lets find it first and show how it affects our results
+
+```{r DEA_exp1}
+## Build initial DEseq matrix
+dds_exp1 <- DESeqDataSetFromMatrix(countData = countData_exp1, 
+                                   colData = colData_exp1, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp1 <- dds_exp1[ rowSums(DESeq2::counts(dds_exp1)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp1 <- DESeq(dds_exp1)
+
+# There seems to be some potential outliers in the plot, so lets find which samples they are:
+# Transform DEA results via rlog
+dds_exp1_rlog <- rlog(dds_exp1)
+
+# Generate merged PCA Data for Clones and Grouping Information
+x <- plotPCA(dds_exp1_rlog,
+             intgroup = 'Clone',
+             returnData = TRUE)
+y <- plotPCA(dds_exp1_rlog,
+             intgroup = 'Group',
+             returnData = TRUE)
+merged_data_exp1 <- merge(x, y[,c("Group","name")], by = "name")
+
+# Rename Clone variables to just numbers
+merged_data_exp1$Clone <- as.numeric(gsub("Clone", "", merged_data_exp1$Clone))
+merged_data_exp1$group <- as.numeric(gsub("Clone", "", merged_data_exp1$group))
+
+merged_data_exp1$Group <- as.factor(gsub("X", "Unexposed", merged_data_exp1$Group))
+merged_data_exp1$Group <- as.factor(gsub("A", "Exposed", merged_data_exp1$Group))
+
+# Add arrow data
+# Split data into group A and X
+data_group_A <- merged_data_exp1 %>% filter(Group == 'Exposed')
+data_group_X <- merged_data_exp1 %>% filter(Group == 'Unexposed')
+
+# Join on Clone to get start and end points for arrows
+arrow_data <- inner_join(data_group_X, data_group_A, by = "Clone", suffix = c("_X", "_A"))
+
+# Calculate mid-points
+arrow_data$mid_x <- (arrow_data$PC1_X + arrow_data$PC1_A) / 2
+arrow_data$mid_y <- (arrow_data$PC2_X + arrow_data$PC2_A) / 2
+
+# Draw plot
+exp1_pca_plot_with_arrows_outlier <- ggplot(data = merged_data_exp1, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group), size = 5) +
+  geom_mark_hull(concavity = 5, expand = 0, radius = 0, aes(fill=Group, colour = Group)) +
+  geom_segment(data = arrow_data, aes(x = PC1_X, 
+                                      y = PC2_X, 
+                                      xend = PC1_A, 
+                                      yend = PC2_A,), 
+               arrow = arrow(type = "closed", 
+                             length = unit(0.20, "inches")), 
+               color = "black") +
+  geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), 
+             size = 3, hjust = 0.5, vjust = 0.5) +
+  scale_color_manual(values = c("Exposed" = "red", "Unexposed" = "blue")) +
+  scale_fill_manual(values = c("Exposed" = "red", "Unexposed" = "blue")) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)) +
+  labs(
+    x = paste("PC1: (58% Variance)"),
+    y = paste("PC2: (20% Vaiance)"), 
+    title = "Experiment 1 PCA Result")
+
+print(exp1_pca_plot_with_arrows_outlier)
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/PCA plots//Exp1_PCA_plot_with_outlier.png", exp1_pca_plot_with_arrows_outlier, width = 10, height = 8)
+```
+
+We can clearly see that clone pair "5" are heavily skewing the data across the largest variance PC, I therefore decided to exclude this pair after bein unable to determine if there was a data entry issue occuring here.
+
+In retrospect now, I think that another step that could be taken is to perform a blind test to see which groups the clones best group to if any. However, this still makes assumptions that by blind testing you are fixing a data entry issue, rather than grouping individuals that respond similarly when in fact they were truly unique.
+
+## Removing Outlier from Experiment 1
+
+We identified a potential outlier clone pair from our PCA plots. We can try to repeat our Differential expression analyses excluding this outlier and see how the results differ.
+
+```{r CountData_exp1_rm_outlier}
+# removing clone5 (columns "X6" and "X24")
+
+# Remove the 'width' column
+countData_exp1 <- as.matrix(subset(counts_exp1, select = c(-Chr,-Start,-End,-Strand,-Length)))
+# Remove outliers in Count Data
+countData_exp1 <- subset(countData_exp1[,c(1:5, 7:9, 11:14)])
+{apply(countData_exp1, 2, as.numeric)
+  sapply(countData_exp1, as.numeric)
+  class(countData_exp1) <- "numeric"
+  storage.mode(countData_exp1) <- "numeric"}
+# Remove outliers in colData Data
+colData_exp1 <- subset(colData[c(1:7,22:28),])
+colData_exp1 <- subset(colData_exp1[c(1:5, 7:9, 11:14),])
+
+## Build initial DEseq matrix
+dds_exp1 <- DESeqDataSetFromMatrix(countData = countData_exp1, 
+                                   colData = colData_exp1, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp1 <- dds_exp1[ rowSums(DESeq2::counts(dds_exp1)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp1 <- DESeq(dds_exp1)
+
+# Samples are used as the control group.
+DEresults_exp1 = results(dds_exp1, contrast = c("Group", 'X', 'A'))
+# Sort results by increasing p-value
+DEresults_exp1 <- DEresults_exp1[order(DEresults_exp1$pvalue),]
+
+# Save DEresults data
+write.csv(as.data.frame(DEresults_exp1), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEresults_exp1_outlier.csv")
+
+# Summary of DEA
+summary(DEresults_exp1)
+# Total number of genes with p < 0.1
+sum(DEresults_exp1$padj < 0.1 & (DEresults_exp1$log2FoldChange < 0 | DEresults_exp1$log2FoldChange > 0), na.rm=TRUE)
+  # 162
+sum(DEresults_exp1$padj < 0.1 & (DEresults_exp1$log2FoldChange < 0), na.rm=TRUE)
+  # 64 down
+sum(DEresults_exp1$padj < 0.1 & (DEresults_exp1$log2FoldChange > 0), na.rm=TRUE)
+  # 98 up
+
+sum(DEresults_exp1$padj < 0.1, na.rm = T)
+
+# Total number of genes with p < 0.05
+DEresults_exp1_05 <- results(dds_exp1, alpha=0.05)
+summary(DEresults_exp1_05)
+sum(DEresults_exp1_05$padj < 0.05, na.rm=TRUE)
+```
+
+By removing the outlier clone pair, we now have 211 significantly differentially expressed genes! (p-adj < 0.1)
+
+Now we need to apply LFCshrinking:
+
+### LFC shrink experiment 1 - EXCLUDING OUTLIER
+
+```{r lfcshrink_exp1_test_wo_outlier}
+# Check if lfcshrink() is suitable - checking for low proportion of counts
+{
+dds <- estimateSizeFactors(dds_exp1)
+normalized_counts <- counts(dds, normalized=TRUE)
+average_counts <- rowMeans(normalized_counts)
+low_count_threshold <- 10
+low_count_genes <- average_counts < low_count_threshold
+proportion_low_count_genes <- sum(low_count_genes) / length(average_counts)
+cat("Proportion of low-count genes:", proportion_low_count_genes, "\n")
+if (proportion_low_count_genes > 0.2) {
+  cat("Consider using lfcShrink() due to a high proportion of low-count genes.\n")
+} else {
+  cat("lfcShrink() may not be necessary based on the proportion of low-count genes.\n")
+}
+}
+
+# Applying LFC Shrink:
+{
+  # Find design of DESeq
+resultsNames(dds)
+  # run lfcShrink()
+res_shrunk <- lfcShrink(dds, coef = "Group_X_vs_A", type = "ashr")
+# save df of results for later
+res_shrunk_exp1 <- as.data.frame(res_shrunk)
+# rlog for PCA plots
+dds_exp1_rlog <- rlog(dds_exp1)
+}
+
+# PCA plot 
+  # PCA plot data:
+{
+exp1_pca_Data <- plotPCA(dds_exp1_rlog, 
+                         intgroup = 'Group', 
+                         returnData = TRUE) 
+x <- plotPCA(dds_exp1_rlog,
+             intgroup = 'Clone',
+             returnData = TRUE)
+y <- plotPCA(dds_exp1_rlog,
+             intgroup = 'Group',
+             returnData = TRUE)
+merged_data_exp1 <- merge(x, y[,c("Group","name")], by = "name")
+
+  # Rename Clone variables to just numbers
+merged_data_exp1$Clone <- as.numeric(gsub("Clone", "", merged_data_exp1$Clone))
+merged_data_exp1$group <- as.numeric(gsub("Clone", "", merged_data_exp1$group))
+  # Rename group variables
+merged_data_exp1$Group <- as.factor(gsub("X", "Unexposed", merged_data_exp1$Group))
+merged_data_exp1$Group <- as.factor(gsub("A", "Exposed", merged_data_exp1$Group))
+
+  # Add arrow data
+
+    # Split data into group A and X
+data_group_A <- merged_data_exp1 %>% filter(Group == 'Exposed')
+data_group_X <- merged_data_exp1 %>% filter(Group == 'Unexposed')
+
+    # Join on Clone to get start and end points for arrows
+arrow_data <- inner_join(data_group_X, data_group_A, by = "Clone", suffix = c("_X", "_A"))
+
+    # Calculate mid-points
+arrow_data$mid_x <- (arrow_data$PC1_X + arrow_data$PC1_A) / 2
+arrow_data$mid_y <- (arrow_data$PC2_X + arrow_data$PC2_A) / 2
+
+  # plot basic PCA to capture PC variance %-ges
+plotPCA(dds_exp1_rlog, intgroup = "Group") + 
+  ggtitle("PCA of RNA-seq Data") + 
+  theme_minimal()
+}
+
+  # Draw plot
+{
+exp1_pca_plot_with_arrows <- ggplot(data = merged_data_exp1, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group), size = 5) +
+  geom_mark_hull(concavity = 5, expand = 0, radius = 0, aes(fill=Group, colour = Group)) +
+  geom_segment(data = arrow_data, aes(x = PC1_X, 
+                                      y = PC2_X, 
+                                      xend = PC1_A, 
+                                      yend = PC2_A,), 
+               arrow = arrow(type = "closed", 
+                             length = unit(0.10, "inches")), 
+               color = "black") +
+  # geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), size = 3, hjust = 0.5, vjust = 0.5) +
+  scale_color_manual(values = c("Exposed" = "red", "Unexposed" = "blue")) +
+  scale_fill_manual(values = c("Exposed" = "red", "Unexposed" = "blue")) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)) +
+  labs(
+    x = paste("PC1: (54% Variance)"),
+    y = paste("PC2: (14% Variance)"), 
+    title = "Experiment 1 PCA Result")
+}
+  # Plot PCA
+print(exp1_pca_plot_with_arrows)
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/PCA plots/Exp1_PCA_plot_excluding_outlier_and_lfcshrink.png", exp1_pca_plot_with_arrows, width = 10, height = 8)
+
+# Volcano Plot
+# Import results
+df_exp1 <- read.csv("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEresults_exp1_outlier.csv", sep = ",", header = TRUE)
+
+# Merge the shrunken results into df_exp1
+df_exp1$gene <- df_exp1$X  # Ensure the gene identifiers are in a column
+df_shrunk <- as.data.frame(res_shrunk)  # Convert the shrunken results to a dataframe
+df_shrunk$gene <- rownames(df_shrunk)  # Ensure gene identifiers are in a column
+
+# Merge the two dataframes based on the gene identifiers
+df_exp1 <- merge(df_exp1, df_shrunk[, c("gene", "log2FoldChange", "padj")], 
+                 by = "gene", suffixes = c("_raw", "_shrunk"))
+
+# Highlight Differentially Expressed Genes with Updated Criteria
+df_exp1$diffexpressed <- 'Non-Sig'
+df_exp1$diffexpressed[df_exp1$padj_shrunk < 0.1 & 
+                      (df_exp1$log2FoldChange_shrunk >= 0)] <- 'Up'
+df_exp1$diffexpressed[df_exp1$padj_shrunk < 0.1 & 
+                      (df_exp1$log2FoldChange_shrunk <= -0)] <- 'Down'
+
+# Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
+df_exp1$diffexpressed <- factor(df_exp1$diffexpressed, levels = c("Non-Sig", "Up", "Down"))
+
+# Plot
+exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp1,
+  aes(
+    x = log2FoldChange_shrunk,
+    y = -log10(padj_shrunk),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 3, alpha = 0.5) +
+  geom_vline(xintercept = 0, col = "black", linetype = "dashed", lwd = 1) + 
+  geom_hline(yintercept = -log10(0.1), col = "black", linetype = "dashed", lwd = 1) + 
+  scale_colour_manual(values = c(
+    "Non-Sig" = "grey70",
+    "Up" = "#ed474a",
+    "Down" = "#5372ed"
+  )) +
+  coord_cartesian(xlim = c(-10, 10)) +
+  scale_x_continuous(breaks = seq(-10, 10, by = 2)) +
+  theme_classic(base_size = 24) +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0, 30, 0, 0), size = 32, color = "black"),
+    axis.title.x = element_text(face = "bold", margin = margin(30, 0, 0, 0), size = 32, color = "black"),
+    axis.text = element_text(size = 24),
+    legend.position = "top"
+  ) +
+  labs(
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-adj")
+  ) +
+  ggtitle(NULL)
+
+# Save the merged results to find which genes are significant:
+print(exp1_volcano_plot_without_outlier_with_lfcshrink)
+
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/exp1_volcano_plot_without_outlier_with_lfcshrink.png", exp1_volcano_plot_without_outlier_with_lfcshrink, width = 10, height = 8)
+# Save DEresults data
+write.csv(as.data.frame(res_shrunk_exp1), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp1_no_outiler_and_shrunk_values.csv")
+```
+
+## Experiment 2
+
+```{r DEA_exp2}
+## Build initial DEseq matrix
+dds_exp2 <- DESeqDataSetFromMatrix(countData = countData_exp2, 
+                                   colData = colData_exp2, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp2 <- dds_exp2[ rowSums(DESeq2::counts(dds_exp2)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp2 <- DESeq(dds_exp2)
+{
+dds <- estimateSizeFactors(dds_exp2)
+normalized_counts <- counts(dds, normalized=TRUE)
+average_counts <- rowMeans(normalized_counts)
+low_count_threshold <- 10
+low_count_genes <- average_counts < low_count_threshold
+proportion_low_count_genes <- sum(low_count_genes) / length(average_counts)
+cat("Proportion of low-count genes:", proportion_low_count_genes, "\n")
+if (proportion_low_count_genes > 0.2) {
+  cat("Consider using lfcShrink() due to a high proportion of low-count genes.\n")
+} else {
+  cat("lfcShrink() may not be necessary based on the proportion of low-count genes.\n")
+}
+}
+
+# Applying LFC Shrink:
+{
+  # Find design of DESeq
+resultsNames(dds)
+design(dds)
+names(dds)
+  # run lfcShrink()
+res_shrunk <- lfcShrink(dds, coef = "Group_C_vs_B", type = "ashr")
+
+# save df of results for later
+res_shrunk_exp2 <- as.data.frame(res_shrunk)
+}
+
+# Differentially Expressed Gene List:
+  # All DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange >= 0 | res_shrunk$log2FoldChange <= 0)), ])
+    # = 12
+  # upregulated DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange >= 0)), ])
+    # = 12
+  # downregulaeted DEGS
+nrow(res_shrunk[which(res_shrunk$padj <= 0.1 & (res_shrunk$log2FoldChange <= 0)), ])
+    # = 0
+
+# PCA plot 
+  # PCA plot data:
+# Transform via rlog
+dds_exp2_rlog <- rlog(dds_exp2)
+
+exp2_pca_Data <- plotPCA(dds_exp2_rlog, 
+                         intgroup = 'Group', 
+                         returnData = TRUE) 
+x <- plotPCA(dds_exp2_rlog,
+             intgroup = 'Clone',
+             returnData = TRUE)
+y <- plotPCA(dds_exp2_rlog,
+             intgroup = 'Group',
+             returnData = TRUE)
+merged_data_exp2 <- merge(x, y[,c("Group","name")], by = "name")
+
+  # Rename Clone variables to just numbers
+merged_data_exp2$Clone <- as.numeric(gsub("Clone", "", merged_data_exp2$Clone))
+merged_data_exp2$group <- as.numeric(gsub("Clone", "", merged_data_exp2$group))
+
+merged_data_exp2$Group <- as.factor(gsub("B", "Unprimed", merged_data_exp2$Group))
+merged_data_exp2$Group <- as.factor(gsub("C", "Primed", merged_data_exp2$Group))
+
+# Add arrow data
+# Split data into group A and X
+data_group_B <- merged_data_exp2 %>% filter(Group == 'Unprimed')
+data_group_C <- merged_data_exp2 %>% filter(Group == 'Primed')
+
+# Join on Clone to get start and end points for arrows
+arrow_data <- inner_join(data_group_B, data_group_C, by = "Clone", suffix = c("_B", "_C"))
+
+# Calculate mid-points
+arrow_data$mid_x <- (arrow_data$PC1_B + arrow_data$PC1_C) / 2
+arrow_data$mid_y <- (arrow_data$PC2_B + arrow_data$PC2_C) / 2
+
+# Draw plot
+
+exp2_pca_plot_with_arrows <- ggplot(data = merged_data_exp2, aes(x = PC1, y = PC2)) +
+  geom_point(aes(color = Group), size = 5) +
+  geom_mark_hull(concavity = 5, expand = 0, radius = 0, aes(fill=Group, colour = Group)) +
+  geom_segment(data = arrow_data, aes(x = PC1_B, 
+                                      y = PC2_B, 
+                                      xend = PC1_C, 
+                                      yend = PC2_C,), 
+               arrow = arrow(type = "closed", 
+                             length = unit(0.10, "inches")), 
+               color = "black") +
+  #geom_label(data = arrow_data, aes(x = mid_x, y = mid_y, label = Clone), 
+  #           size = 3, hjust = 0.5, vjust = 0.5) +
+  scale_color_manual(values = c("Unprimed" = "goldenrod2", "Primed" = "green3")) +
+  scale_fill_manual(values = c("Unprimed" = "goldenrod2", "Primed" = "green3")) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)) +
+  labs(
+    x = paste("PC1: (46% Variance)"),
+    y = paste("PC2: (23% Vaiance)"), 
+    title = "Experiment 2 PCA Result")
+
+
+# Plot the plot
+print(exp2_pca_plot_with_arrows)
+
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/PCA plots/exp2_PCA_plot_lfcshrink.png", exp2_pca_plot_with_arrows, width = 10, height = 8)
+
+# Volcano plot ----
+# Make dataframe of results
+df_exp2 <- as.data.frame(res_shrunk)
+df_exp2$Expression <- 'NO'
+df_exp2$Expression[df_exp2$log2FoldChange > (0) & df_exp2$padj < 0.1] <- 'UP'
+df_exp2$Expression[df_exp2$log2FoldChange < (0) & df_exp2$padj < 0.1] <- 'DOWN'
+
+# Plot figure
+volcano_exp2 <- ggplot(data = df_exp2,
+       aes(x = log2FoldChange, y = -log10(padj), 
+           col = Expression
+           )) + 
+  geom_point(size = 2, alpha = 0.5) + 
+  # geom_vline(xintercept = c(-1), col = "darkgrey", linetype = "dashed") + 
+  geom_vline(xintercept = c(0), col = "grey1", linetype = "dashed", linewidth= 0.7) + 
+  geom_hline(yintercept = c(1), col = "grey1", linetype = "dashed", linewidth= 0.7) + 
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  #scale_fill_gradient(low = "#2396de", high = "#db183f") +
+  scale_color_manual(values = c("gray","brown1"),
+                     labels = c("Non Significant", "Up Regulated")) + 
+  labs(x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-adjusted"), color = "LFC") + 
+  scale_x_continuous(limits = c(-20,20), breaks = c(-20,-15,-10,-5,0,5,10,15,20)) + 
+  scale_y_continuous(limits = c(0,6), breaks = c(0,1,2,3,4,5,6))
+
+print(volcano_exp2)
+
+# Save plot
+ggsave("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Volcano Plots/volcano_exp2.png", volcano_exp2, width = 18, height = 12, units= "cm", dpi = 300)
+
+# Save results
+# Save DEresults data
+write.csv(as.data.frame(res_shrunk_exp2), file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEA_results_exp2_shrunk_values.csv")
+```
+
+## Intersection of Results - Venn Diagrams
+
+```{r Venn_Diagram}
+vendDEresults_exp1 <- na.omit(res_shrunk_exp1)
+vendDEresults_exp1$gene <- rownames(vendDEresults_exp1)
+vendDEresults_exp1 <- vendDEresults_exp1[,c("padj","gene")]
+vendDEresults_exp1 <- vendDEresults_exp1[vendDEresults_exp1$padj < 0.1,]
+vendDEresults_exp1 <- na.omit(vendDEresults_exp1)
+
+vendDEresults_exp2 <- na.omit(res_shrunk_exp2)
+vendDEresults_exp2$gene <- rownames(vendDEresults_exp2)
+vendDEresults_exp2 <- vendDEresults_exp2[,c("padj","gene")]
+vendDEresults_exp2 <- vendDEresults_exp2[vendDEresults_exp2$padj < 0.1,]
+vendDEresults_exp2 <- na.omit(vendDEresults_exp2)
+
+List <- list('Experiment 1'=rownames(vendDEresults_exp1),
+             'Experiment 2'=rownames(vendDEresults_exp2))
+
+ggVennDiagram(List) + 
+  scale_fill_distiller(palette = "Reds", direction = 1) + 
+  labs(title = "Intersection of Differentially Expressed Genes")
+
+# All DEGs are unique between experiments, no overlap
+```
+
+
+# Marius' Comments
+
+adding a small section here to work on the points from Marius' comments on the 6th iteration draft of chapter 1
+
+- Make the volcano plots using raw p-values, highlighting p-adj significant points
+- Make a 2x2 plot with the new volcanos and the PCA plots to make a single figure
+
+- correlate the raw and shrunk lfc values between experiments
+
+## New volcano plots
+
+```{r new_volcanos}
+# experiment 1 ----
+# Import results
+df_exp1 <- read.csv("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/DEresults_exp1_outlier.csv", sep = ",", header = TRUE)
+
+# Merge the shrunken results into df_exp1
+df_exp1$gene <- df_exp1$X  # Ensure the gene identifiers are in a column
+dds <- estimateSizeFactors(dds_exp1)
+res_shrunk <- lfcShrink(dds, coef = "Group_X_vs_A", type = "ashr")
+df_shrunk <- as.data.frame(res_shrunk)  # Convert the shrunken results to a dataframe
+df_shrunk$gene <- rownames(df_shrunk)  # Ensure gene identifiers are in a column
+
+# Merge the two dataframes based on the gene identifiers
+df_exp1 <- merge(df_exp1, df_shrunk[, c("gene", "log2FoldChange", "padj")], 
+                 by = "gene", suffixes = c("_raw", "_shrunk"))
+
+# Highlight Differentially Expressed Genes with Updated Criteria
+df_exp1$diffexpressed <- 'P-adj > 0.1'
+df_exp1$diffexpressed[df_exp1$padj_shrunk <= 0.1] <- 'P-adj <= 0.1'
+
+# Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
+df_exp1$diffexpressed <- factor(df_exp1$diffexpressed, levels = c("P-adj > 0.1", "P-adj <= 0.1"))
+
+# Plot
+exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp1,
+  aes(
+    x = log2FoldChange_shrunk,
+    y = -log10(pvalue),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 1.5, alpha = 0.8) +
+  geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
+  scale_colour_manual(values = c(
+    "P-adj > 0.1" = "grey80",
+    "P-adj <= 0.1" = "black"
+  )) +
+  coord_cartesian(xlim = c(-6, 6), ylim = c(0,20)) +
+  scale_x_continuous(breaks = seq(-6, 6, by = 2)) +
+    scale_y_continuous(breaks = seq(0, 20, by = 5)) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-value")
+  ) +
+  ggtitle(NULL)
+
+# Save the merged results to find which genes are significant:
+print(exp1_volcano_plot_without_outlier_with_lfcshrink)
+
+
+
+
+# experiment 2 ----
+dds_exp2 <- DESeqDataSetFromMatrix(countData = countData_exp2, 
+                                   colData = colData_exp2, 
+                                   design = as.formula(designFormula))
+## Remove genes that have almost no information in any give samples
+dds_exp2 <- dds_exp2[ rowSums(DESeq2::counts(dds_exp2)) > 1, ]
+# Now perform Differential expression analysis
+dds_exp2 <- DESeq(dds_exp2)
+dds <- estimateSizeFactors(dds_exp2)
+# lfc shrinking
+res_shrunk <- lfcShrink(dds, coef = "Group_C_vs_B", type = "ashr")
+
+# build volcano
+df_exp2 <- as.data.frame(res_shrunk)
+# Highlight Differentially Expressed Genes with Updated Criteria
+df_exp2$diffexpressed <- 'P-adj > 0.1'
+df_exp2$diffexpressed[df_exp2$padj <= 0.1] <- 'P-adj <= 0.1'
+# Ensure diffexpressed is a factor and set the levels so "SHRUNK" is last
+df_exp2$diffexpressed <- factor(df_exp2$diffexpressed, levels = c("P-adj > 0.1", "P-adj <= 0.1"))
+
+# Plot figure
+exp2_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
+  data = df_exp2,
+  aes(
+    x = log2FoldChange,
+    y = -log10(pvalue),
+    colour = diffexpressed
+  )
+) + 
+  geom_point(size = 1.5, alpha = 0.8) +
+  geom_vline(xintercept = 0, col = "grey50", linetype = "dashed", lwd = 1) + 
+  scale_colour_manual(values = c(
+    "P-adj > 0.1" = "grey80",
+    "P-adj <= 0.1" = "black"
+  )) +
+  coord_cartesian(xlim = c(-20, 20), ylim = c(0,20)) +
+  scale_x_continuous(breaks = seq(-20, 20, by = 5)) +
+  scale_y_continuous(breaks = seq(0, 20, by = 5)) + 
+  theme_classic() +
+  theme(
+    axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = "black"),
+    axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = "black"),
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    x = expression("log"[2] * " Fold Change"),
+    y = expression("-log"[10] * " p-value")
+  ) +
+  ggtitle(NULL)
+
+print(exp2_volcano_plot_without_outlier_with_lfcshrink)
+
+# plot side-by-side
+library(gridExtra)
+library(grid)
+library(patchwork)
+
+plot <- (exp1_volcano_plot_without_outlier_with_lfcshrink | exp2_volcano_plot_without_outlier_with_lfcshrink)
+
+plot2 <- ((exp1_pca_plot_with_arrows +  labs(title = "")) +
+  theme(plot.title = element_text(size = 12),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10)) | (exp2_pca_plot_with_arrows + labs(title = "") +
+  theme(plot.title = element_text(size = 12),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10))))
+
+volcano_and_pca_plots <- (plot / plot2) 
+
+png(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/volcano_and_pca_plots.png",
+  width = 10,
+  height = 7,
+  units = "in",
+  res = 900
+)
+volcano_and_pca_plots
+dev.off()
+```
