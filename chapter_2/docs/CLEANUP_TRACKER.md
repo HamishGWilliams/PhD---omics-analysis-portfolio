@@ -3,7 +3,7 @@
 **Project scope:** Make `chapter_2` a clear, reproducible and publication-ready DNA methylation workflow for *Actinia equina* diesel-exposure experiments.  
 **Created:** 2026-05-25  
 **Target branch:** `main`  
-**Current work state:** Desktop-only changes require reconciliation with the current remote `main` branch before further cleanup batches. The desktop shell type must be accounted for when supplying audit commands.  
+**Current work state:** Desktop-only changes require reconciliation with the current remote `main` branch before further cleanup batches. The desktop checkout contains uncommitted downstream ORA/semantic-overlap analysis files requiring preservation and subsequent classification.  
 **Update rule:** Every subsequent Chapter 2 cleanup action must update task status, decisions and the progress log.
 
 **Linked documentation**
@@ -46,9 +46,9 @@ Reference genome / annotations + trimmed EM-seq reads
 | Outlier assessment | Figure 2 | Figure/Material 2 | Candidate producers present; retain until reproducible. |
 | Base-level DMA | Figure 3 | - | Current Stage 8 candidate requires validation. |
 | Region-level DMA | Table 2; Figures 4-5 | - | Stage 10 candidate exists; Figure 4 producer unresolved. |
-| Functional interpretation | Figure 6 | Table 4 | Candidate R Markdown analysis is non-portable and uses temporary outputs. |
+| Functional interpretation | Figure 6 | Table 4 | Candidate R Markdown analysis is non-portable; desktop ORA and semantic-clustering scripts/outputs have now been identified for import and review. |
 | Methylation-expression integration | Figure 7 | Table 3 | Canonical producer unresolved. |
-| DEG/DMR/GO intersection | Figure 8 | Contribution to Table 4 | Candidate legacy outputs exist; canonical producer unresolved. |
+| DEG/DMR/GO intersection | Figure 8 | Contribution to Table 4 | Desktop overlap/semantic-description scripts and Venn outputs identified for import and review. |
 | M-bias evidence | - | Figure/Material 1 | Per-sample plots present; composite producer unresolved. |
 
 ## Current audit findings and implemented decisions
@@ -64,6 +64,8 @@ Reference genome / annotations + trimmed EM-seq reads
 | A-007 | No active script invokes the moved helper filenames. | No computational path updates were required for relocation batch 001; archived scripts retain original historical data paths as provenance. |
 | A-008 | Local desktop changes may pre-date recent cleanup commits on remote `main`. | Preserve them on a dedicated desktop branch, merge/rebase current `origin/main`, review any path conflicts created by relocation batch 001, then push for review. |
 | A-009 | Desktop command-line environment does not reliably accept pasted multi-line PowerShell commands. | Use one-line commands compatible with Windows Command Prompt while preserving the same large-file and status checks. |
+| A-010 | Desktop changes include five new downstream-analysis R scripts and multiple ORA/semantic-clustering/overlap tables and figures. | Preserve on `chapter2-desktop-local-changes`; these are candidate producers/outputs for thesis Figures 6 and 8 and Supplementary Table 4. |
+| A-011 | Two local AnnotationDbi/SQLite resources are 165.8 MB each. | `data/org/org.Aequina.eg.db/inst/extdata/org.Aequina.eg.sqlite`; `data/org/org.Aequina.eg.sqlite`. Confirm ignore/tracking status and do not add to ordinary Git history. |
 
 ## Task list
 
@@ -76,7 +78,8 @@ Reference genome / annotations + trimmed EM-seq reads
 | CH2-002 | Regenerate non-empty local file-size report on Maxwell. | High | `[!]` | Current committed size report is empty. |
 | CH2-003 | Write user-facing `chapter_2/README.md` with required inputs, execution order and retained outputs. | High | `[ ]` | Complete after canonical scripts/output policy are fixed. |
 | CH2-004 | Map thesis draft figures/tables to repository output requirements and candidate scripts. | Critical | `[x]` | Recorded in `THESIS_OUTPUT_MAP.md`. |
-| CH2-005 | Reconcile uncommitted desktop-only changes with the current remote repository before additional cleanup edits. | High | `[~]` | Desktop branch/fetch workflow in progress; use one-line Command Prompt-compatible audit commands, then review changed files before staging. |
+| CH2-005 | Reconcile uncommitted desktop-only changes with the current remote repository before additional cleanup edits. | High | `[~]` | Desktop branch confirmed; ORA/semantic/overlap scripts and outputs should be committed selectively while excluding two oversized SQLite databases. |
+| CH2-006 | Inspect imported desktop downstream-analysis scripts and outputs after preservation commit. | High | `[ ]` | Determine canonical producers and final destinations for Figures 6 and 8 and Supplementary Table 4. |
 
 ### Phase 1 — Directory and tracked-file hygiene
 
@@ -93,7 +96,7 @@ Reference genome / annotations + trimmed EM-seq reads
 | ID | Task | Priority | Status | Notes |
 |---|---|---:|---|---|
 | CH2-020 | Validate metadata, contrasts, clone pairing and outlier exclusions. | Critical | `[ ]` | Required for Figures 2-5. |
-| CH2-021 | Audit UniProt/matching resources and downstream consumption. | High | `[ ]` | Required for Figure 6 and Supplementary Table 4. |
+| CH2-021 | Audit UniProt, matching and local organism-annotation resources and downstream consumption. | High | `[~]` | Two local `org.Aequina.eg.sqlite` resources are oversized and need a reproducible generation/provenance decision rather than Git inclusion. |
 | CH2-022 | Document excluded reference inputs with provenance and checksum plan. | High | `[ ]` | FASTA/GFF3 remain local due to size. |
 | CH2-023 | Reconcile methods/filtering/expression-integration notes with final code. | Medium | `[ ]` | Particularly relevant to Figure 7. |
 
@@ -137,7 +140,7 @@ Reference genome / annotations + trimmed EM-seq reads
 | CH2-062 | Refactor or archive non-portable exploratory plotting/summarising scripts. | Medium | `[ ]` | Includes alignment and methylation-profile plotting. |
 | CH2-063 | Reconcile figure folders with `THESIS_OUTPUT_MAP.md`. | Medium | `[ ]` | Consolidate main/supplementary outputs later. |
 | CH2-064 | Identify/create methylation-expression integration for Figure 7/Table 3. | Critical | `[ ]` | Producer unresolved. |
-| CH2-065 | Identify/create DEG/DMR/GO intersection analysis for Figure 8/Table 4. | High | `[ ]` | Candidate temporary outputs require provenance. |
+| CH2-065 | Identify/create DEG/DMR/GO intersection analysis for Figure 8/Table 4. | High | `[~]` | Desktop files `overlapping_GOs_and_genes.R`, `semantic_cluster_ORA.R`, `semantic_names_ORA_plots.R` and related outputs are candidates awaiting import/inspection. |
 
 ### Phase 7 — Reproducibility and publication readiness
 
@@ -145,7 +148,7 @@ Reference genome / annotations + trimmed EM-seq reads
 |---|---|---:|---|---|
 | CH2-070 | Standardise directory and script organisation. | High | `[~]` | Started by separating migration helpers from active workflow. |
 | CH2-071 | Replace environment-specific paths with configurable project roots. | Critical | `[ ]` | Required before sharing. |
-| CH2-072 | Record modules/packages/resources/input identifiers and checksums. | High | `[ ]` | Build reproducibility manifest. |
+| CH2-072 | Record modules/packages/resources/input identifiers and checksums. | High | `[ ]` | Build reproducibility manifest; include local organism-annotation database generation. |
 | CH2-073 | Audit that each retained thesis output has a producing script and documented inputs. | Critical | `[ ]` | Final dependency check. |
 | CH2-074 | Run final Git hygiene audit. | Critical | `[ ]` | No oversized outputs, duplicates or invalid placeholders. |
 | CH2-075 | Correct thesis output labels/cross-references after analysis validation. | Medium | `[ ]` | Includes Figure 9/Figure 7 mismatch. |
@@ -162,6 +165,7 @@ Reference genome / annotations + trimmed EM-seq reads
 | D-006 | Use `results/tables/` and `results/figures/{main_text,supplementary}/` for final thesis-facing outputs. | Proposed |
 | D-007 | Historical migration helpers are archived under `scripts/archive/migration_helpers/`, excluded from active workflow, and retain original internal HPC paths as provenance. | Implemented in relocation batch 001 |
 | D-008 | Desktop-only uncommitted changes must be isolated on a feature branch before pulling or merging current `main`. | Active |
+| D-009 | Oversized local organism-annotation SQLite databases must not be committed to ordinary Git history; preserve generation/provenance instructions instead. | Active |
 
 ## Progress log
 
@@ -174,4 +178,5 @@ Reference genome / annotations + trimmed EM-seq reads
 | 2026-05-25 | Mapped thesis draft figures/tables to repository requirements and candidate producers. Added `THESIS_OUTPUT_MAP.md`. | CH2-004, CH2-032, CH2-034, CH2-044, CH2-055, CH2-064, CH2-065, CH2-075 |
 | 2026-05-25 | Relocation batch 001: moved five import/transfer helper scripts from active locations to `scripts/archive/migration_helpers/`, added archive documentation and `FILE_RELOCATION_LOG.md`; no analytical path edits were required because no active code invokes the moved helper filenames. | CH2-014, CH2-033, CH2-070 |
 | 2026-05-25 | User reported uncommitted local desktop changes not yet represented remotely; desktop reconciliation workflow initiated to preserve, integrate and subsequently review those changes against current `main`. | CH2-005 |
-| 2026-05-25 | User encountered multi-line paste difficulties in Windows Command Prompt during desktop large-file audit; switched instructions to single-line Command Prompt-compatible checks before staging. | CH2-005 |
+| 2026-05-25 | Switched desktop guidance to single-line Windows Command Prompt-compatible audit commands after multi-line paste difficulties. | CH2-005 |
+| 2026-05-25 | Desktop status revealed new ORA, semantic-clustering and overlap scripts/results likely relevant to Figures 6 and 8, plus two 165.8 MB local SQLite annotation databases to exclude from Git history. | CH2-005, CH2-006, CH2-021, CH2-065, CH2-072 |
