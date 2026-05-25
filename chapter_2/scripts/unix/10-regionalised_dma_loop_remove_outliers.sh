@@ -1,4 +1,4 @@
-#!/usr/bin/env Rscript
+#!/bin/bash
 #SBATCH --job-name=regionalised_dma_no_outliers
 #SBATCH --mem=100G
 #SBATCH --partition=uoa-compute
@@ -10,6 +10,10 @@
 #SBATCH --time=1-00:00:00
 #SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
 #SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
+
+module load r/4.2.2
+
+Rscript --vanilla - <<'RSCRIPT'
 
 suppressPackageStartupMessages({
   library(methylKit)
@@ -40,16 +44,27 @@ annotation_gff3 <- file.path(external_dir, "combined_annotations.gff3")
 
 if (!file.exists(annotation_gff3)) {
   annotation_gff3_alt <- file.path(external_dir, "combined_annotation.gff3")
+
   if (file.exists(annotation_gff3_alt)) {
     annotation_gff3 <- annotation_gff3_alt
   }
 }
 
-metadata_file <- file.path(project_dir, "data", "metadata", "Methyl_sample_groups.txt")
+metadata_file <- file.path(
+  project_dir,
+  "data",
+  "metadata",
+  "Methyl_sample_groups.txt"
+)
 
 results_dir <- file.path(project_dir, "results")
 
-figure_dir <- file.path(results_dir, "figures", "regionalised_dma_no_outlier_pairs")
+figure_dir <- file.path(
+  results_dir,
+  "figures",
+  "regionalised_dma_no_outlier_pairs"
+)
+
 qc_figure_dir <- file.path(figure_dir, "methylkit_qc")
 pca_figure_dir <- file.path(figure_dir, "pca")
 volcano_figure_dir <- file.path(figure_dir, "volcano")
@@ -64,7 +79,7 @@ loadings_dir <- file.path(
 model_output_dir <- file.path(
   results_dir,
   "model_outputs",
-  "regionalised_dma_no_outlier_pairs"
+  "region_level_dma_no_outlier_pairs"
 )
 
 tmp_methylkit_dir <- file.path(
@@ -82,6 +97,8 @@ dir.create(tmp_methylkit_dir, recursive = TRUE, showWarnings = FALSE)
 
 n_cores <- as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "24"))
 
+message("Using ", n_cores, " cores.")
+
 # -------------------------------
 # Analysis settings
 # -------------------------------
@@ -96,6 +113,10 @@ safe_name <- function(x) {
 # -------------------------------
 # Metadata
 # -------------------------------
+
+if (!file.exists(metadata_file)) {
+  stop("Metadata file not found: ", metadata_file)
+}
 
 sample_metadata <- read.table(
   metadata_file,
@@ -131,7 +152,11 @@ genome_df[] <- lapply(genome_df, function(x) {
   if (is.factor(x)) {
     x <- as.character(x)
   }
-  x[is.na(x)] <- "NA"
+
+  if (is.character(x)) {
+    x[is.na(x)] <- "NA"
+  }
+
   x
 })
 
@@ -226,17 +251,11 @@ get_sample_info <- function(experiment) {
 # -------------------------------
 # Input preparation
 # -------------------------------
-# The regionalisation script writes files with metadata columns.
-# methylKit expects bismarkCoverage-like six-column files:
-# chr, start, end, percent_methylation, numCs, numTs.
-# This function converts regionalised count files into temporary
-# methylKit-compatible input files.
 
 prepare_methylkit_region_file <- function(input_file, output_file) {
   dt <- fread(input_file)
 
   required_cols <- c("chr", "start", "end", "numCs", "numTs", "coverage")
-
   missing_cols <- setdiff(required_cols, names(dt))
 
   if (length(missing_cols) > 0) {
@@ -257,7 +276,6 @@ prepare_methylkit_region_file <- function(input_file, output_file) {
       !is.na(coverage)
   ]
 
-  # methylKit cannot use regions with zero total coverage.
   dt <- dt[coverage > 0]
 
   if (nrow(dt) == 0) {
@@ -328,7 +346,13 @@ build_file_list <- function(experiment, context, region, sample_info) {
 # PCA plotting helper
 # -------------------------------
 
-plot_regional_pca <- function(act_data_normed_fu, experiment, context, region, sample_metadata) {
+plot_regional_pca <- function(
+  act_data_normed_fu,
+  experiment,
+  context,
+  region,
+  sample_metadata
+) {
   pca_results <- PCASamples(
     act_data_normed_fu,
     comp = c(1, 2),
@@ -385,8 +409,11 @@ plot_regional_pca <- function(act_data_normed_fu, experiment, context, region, s
     colour_values <- c("B" = "goldenrod2", "C" = "green")
   }
 
-  data_group_control <- pca_data %>% filter(Group == control_group)
-  data_group_treatment <- pca_data %>% filter(Group == treatment_group)
+  data_group_control <- pca_data %>%
+    filter(Group == control_group)
+
+  data_group_treatment <- pca_data %>%
+    filter(Group == treatment_group)
 
   arrow_data <- inner_join(
     data_group_control,
@@ -433,7 +460,13 @@ plot_regional_pca <- function(act_data_normed_fu, experiment, context, region, s
     scale_fill_manual(values = colour_values) +
     theme_bw() +
     labs(
-      title = paste("Regional PCA:", context, region, experiment, "outlier pairs excluded"),
+      title = paste(
+        "Regional PCA:",
+        context,
+        region,
+        experiment,
+        "outlier pairs excluded"
+      ),
       x = paste0("PC1 (", round(explained_variance[1] * 100, 1), "%)"),
       y = paste0("PC2 (", round(explained_variance[2] * 100, 1), "%)"),
       color = "Group",
@@ -503,7 +536,6 @@ for (experiment in experiments) {
         next
       }
 
-      # Convert regionalised count files to methylKit-compatible six-column files
       converted_files <- character(length(paths$input_files))
       conversion_failed <- FALSE
 
@@ -725,7 +757,12 @@ for (experiment in experiments) {
           covariates = covariates_df,
           overdispersion = "MN",
           mc.cores = n_cores,
-          suffix = paste0(context, "_fu3_", safe_region, "_odMNtestC_no_outlier_pairs")
+          suffix = paste0(
+            context,
+            "_fu3_",
+            safe_region,
+            "_odMNtestC_no_outlier_pairs"
+          )
         )
       }, error = function(e) {
         message("Error in differential methylation calculation: ", e$message)
@@ -749,6 +786,7 @@ for (experiment in experiments) {
         )
 
         act_diff_data <- getData(diffMethData)
+        act_diff_data <- as.data.frame(act_diff_data, stringsAsFactors = FALSE)
 
         act_diff_data$p_fdr <- p.adjust(
           act_diff_data$pvalue,
@@ -779,19 +817,45 @@ for (experiment in experiments) {
 
         volcano_data <- act_diff_data_df_ann
 
+        volcano_data$p_fdr <- as.numeric(volcano_data$p_fdr)
+        volcano_data$meth.diff <- as.numeric(volcano_data$meth.diff)
+
+        volcano_data$p_fdr_plot <- pmax(
+          volcano_data$p_fdr,
+          .Machine$double.xmin
+        )
+
+        volcano_data$neg_log10_fdr <- -log10(volcano_data$p_fdr_plot)
+
         volcano_data$diffmeth <- ifelse(
           volcano_data$meth.diff >= 0,
           "UP",
           "DOWN"
         )
 
-        volcano_data$diffmeth <- as.factor(volcano_data$diffmeth)
+        volcano_data$diffmeth <- factor(
+          volcano_data$diffmeth,
+          levels = c("DOWN", "UP")
+        )
+
+        volcano_data <- volcano_data[
+          is.finite(volcano_data$meth.diff) &
+            is.finite(volcano_data$neg_log10_fdr),
+        ]
+
+        if (nrow(volcano_data) == 0) {
+          stop("No finite rows available for volcano plot.")
+        }
 
         volcano_plot <- ggplot(
           data = volcano_data,
-          aes(x = meth.diff, y = -log10(p_fdr), col = diffmeth)
+          aes(
+            x = meth.diff,
+            y = neg_log10_fdr,
+            col = diffmeth
+          )
         ) +
-          geom_point() +
+          geom_point(alpha = 0.7, size = 1) +
           geom_vline(xintercept = -5, col = "blue", linetype = "dashed") +
           geom_vline(xintercept = 5, col = "red", linetype = "dashed") +
           geom_hline(yintercept = 1, col = "black", linetype = "dashed") +
@@ -813,8 +877,14 @@ for (experiment in experiments) {
             plot.title = element_text(hjust = 0.5)
           ) +
           scale_color_manual(
-            values = c("deepskyblue", "brown1"),
-            labels = c("Down methylated", "Up methylated")
+            values = c(
+              "DOWN" = "deepskyblue",
+              "UP" = "brown1"
+            ),
+            labels = c(
+              "Down methylated",
+              "Up methylated"
+            )
           ) +
           labs(
             x = "Differential methylation %",
@@ -952,3 +1022,5 @@ for (experiment in experiments) {
 }
 
 message("All regionalised DMR analyses with outlier pairs excluded are complete.")
+
+RSCRIPT
