@@ -1,0 +1,10 @@
+Input counts file: C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/A_Equina_Counts_redo.tsv
+Input colData file: C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Data/colData.tsv
+Removed sample columns: 6, 24
+Removed colData rows: X6, X24
+Paired design: ~ Clone + Group
+No-clone design: ~ Group
+LFC shrinkage coefficient: Group_X_vs_A
+LFC shrinkage method: ashr
+Significance criterion: BH-adjusted p-value < 0.1
+Gene filter retained from source Rmd: rowSums(DESeq2::counts(dds)) > 1

@@ -1,0 +1,6 @@
+"comparison","n_genes"
+"Shared DEGs",28
+"Shared DEGs with same LFC direction",28
+"Shared DEGs with opposing LFC direction",0
+"Unique to paired clone design",183
+"Unique to no-clone design",5

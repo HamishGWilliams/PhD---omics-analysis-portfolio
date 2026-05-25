@@ -1,4 +1,39 @@
 ---
+# ============================================================
+# Calculate whether each GSEA ridge peaks below or above zero
+# ============================================================
+
+get_density_peak <- function(x) {
+  x <- x[!is.na(x)]
+
+  if (length(unique(x)) < 2) {
+    return(NA_real_)
+  }
+
+  d <- density(x)
+  d$x[which.max(d$y)]
+}
+
+ridge_peak_df <- GSEA_plot_df %>%
+  dplyr::group_by(contrast, term) %>%
+  dplyr::summarise(
+    peak_lfc = get_density_peak(lfc),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    peak_direction = dplyr::case_when(
+      is.na(peak_lfc) ~ "Peak unavailable",
+      peak_lfc < 0   ~ "Peak < 0",
+      peak_lfc > 0   ~ "Peak > 0",
+      TRUE           ~ "Peak = 0"
+    )
+  )
+
+GSEA_plot_df_coloured <- GSEA_plot_df %>%
+  dplyr::left_join(
+    ridge_peak_df,
+    by = c("contrast", "term")
+  )---
 title: "Chapter 3 - Enrichment Analyses"
 author: "Hamish Williams"
 date: "`r Sys.Date()`"
@@ -14,6 +49,7 @@ knitr::opts_chunk$set(echo = TRUE)
 RMarkdown Script for the enrichment analyses portion of this chapter, allows me to make easier comments on whats going on
 
 # Load Packages
+
 ```{r packages}
 # Load packages ----
 check_packages <- function(pkg_list) {
@@ -70,33 +106,297 @@ convertFractionToNumeric <- function(fraction) {
 }
 ```
 
-## Load Data
-```{r data}
-getwd()
-# Load the data
-BP_MF_Terms <- read.table("../Data/Processed/UNIPROT_results.txt", 
-                          header = T, 
-                          sep = '\t', 
-                          stringsAsFactors = FALSE)
+## Extract GO terms
 
-# Import the blastp (matching) file
-matching_file <- read.table("../Data/Large_Data_Files/genome_matching_file.txt", 
-                            header = F, 
-                            sep = '\t', 
-                            stringsAsFactors = FALSE)
+```{r get_GO_data}
+## Merge Blastp and GO terms files together
+BP_MF_Terms <- read.table(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_2/data/temp_storage/UNIPROT_results.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  quote = ""
+)
 
-# Data manipulations
-# Change the name of the columns to be identical
+matching_file <- read.table(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_2/data/temp_storage/genome_matching_file.txt",
+  header = FALSE,
+  sep = "\t",
+  stringsAsFactors = FALSE
+)
+
+# Change the name of the columns to be identical ----
 {
-names(matching_file)[names(matching_file) == "V13"] <- "ID"
-names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
-names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
-names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
-names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(matching_file)[names(matching_file) == "V1"] <- "GENE"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "From"] <- "ID"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Names"] <- "GENENAMES"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..biological.process."] <- "GO:BP"
+  names(BP_MF_Terms)[names(BP_MF_Terms) == "Gene.Ontology..molecular.function."] <- "GO:MF"
 }
 
+GO_lookup <- BP_MF_Terms %>%
+  group_by(ID) %>%
+  summarise(
+    has_GO = any(
+      (!is.na(`GO:BP`) & trimws(`GO:BP`) != "") |
+      (!is.na(`GO:MF`) & trimws(`GO:MF`) != "")
+    ),
+    .groups = "drop"
+  )
+
+matching_file <- matching_file %>%
+  left_join(GO_lookup, by = "ID") %>%
+  filter(has_GO) %>%
+  group_by(GENE) %>%
+  slice_min(order_by = as.numeric(V11), n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(-has_GO)
+
+matching_file <- unique(matching_file)
+  
+# Merge all matched BLAST rows with UniProt GO annotations
+merged_df <- merge(matching_file, BP_MF_Terms, by = "ID") # genrates duplicates when matching
+merged_df <- unique(merged_df)
+
+# Helper function:  -------------------------------
+# expands one GO column so that each GO term becomes its own row
+
+expand_go_column_mem <- function(
+  df,
+  go_col,
+  gene_col = "GENE",
+  id_col = "ID",
+  deduplicate = FALSE
+) {
+  empty_out <- data.frame(
+    GENE = character(),
+    ID   = character(),
+    GO   = character(),
+    TERM = character(),
+    stringsAsFactors = FALSE
+  )
+
+  # Check required columns exist
+  if (!all(c(go_col, gene_col, id_col) %in% names(df))) {
+    stop("One or more specified columns do not exist in the data frame.")
+  }
+
+  go_text  <- as.character(df[[go_col]])
+  gene_vec <- as.character(df[[gene_col]])
+  id_vec   <- as.character(df[[id_col]])
+
+  # Keep only usable rows up front
+  keep <- !is.na(go_text) &
+          trimws(go_text) != "" &
+          !is.na(gene_vec) &
+          !is.na(id_vec)
+
+  if (!any(keep)) {
+    return(empty_out)
+  }
+
+  go_text  <- go_text[keep]
+  gene_vec <- gene_vec[keep]
+  id_vec   <- id_vec[keep]
+
+  # Clean up extracted GO term descriptions
+  clean_term <- function(x) {
+    x <- trimws(x)
+
+    # Normalise curly quotes to straight quotes
+    x <- gsub("[\u2018\u2019]", "'", x, perl = TRUE)
+    x <- gsub("[\u201C\u201D]", "\"", x, perl = TRUE)
+
+    # Remove surrounding quotes/backticks
+    x <- gsub("^[[:space:]]*[\"'`]+", "", x, perl = TRUE)
+    x <- gsub("[\"'`]+[[:space:]]*$", "", x, perl = TRUE)
+
+    # Remove leading/trailing separators left over from splitting
+    x <- gsub("^[[:space:]]*[,;:]+[[:space:]]*", "", x, perl = TRUE)
+    x <- gsub("[[:space:]]*[,;:]+[[:space:]]*$", "", x, perl = TRUE)
+
+    # Final trim
+    x <- trimws(x)
+
+    x
+  }
+
+  # Extract GO-term pairs from one cell
+  extract_go_pairs <- function(x) {
+    x <- as.character(x)
+    if (is.na(x) || trimws(x) == "") return(NULL)
+
+    # Normalise whitespace and quotes
+    x <- gsub("[\r\n\t]+", " ", x, perl = TRUE)
+    x <- gsub("\\s+", " ", x, perl = TRUE)
+    x <- gsub("[\u2018\u2019]", "'", x, perl = TRUE)
+    x <- gsub("[\u201C\u201D]", "\"", x, perl = TRUE)
+    x <- trimws(x)
+
+    # Split first on semicolons, then extract every GO match within each chunk
+    chunks <- trimws(unlist(strsplit(x, ";", fixed = TRUE)))
+    chunks <- chunks[chunks != ""]
+
+    if (length(chunks) == 0L) return(NULL)
+
+    go_ids   <- character()
+    go_terms <- character()
+
+    for (chunk in chunks) {
+      # Match each "description [GO:0000000]" unit
+      matches <- regmatches(
+        chunk,
+        gregexpr("[^\\[]*\\[GO:[0-9]{7}\\]", chunk, perl = TRUE)
+      )[[1]]
+
+      if (length(matches) == 0L) next
+
+      for (m in matches) {
+        this_go <- sub(".*\\[(GO:[0-9]{7})\\].*", "\\1", m, perl = TRUE)
+        this_term <- sub("\\s*\\[GO:[0-9]{7}\\].*", "", m, perl = TRUE)
+        this_term <- clean_term(this_term)
+
+        go_ids   <- c(go_ids, this_go)
+        go_terms <- c(go_terms, if (nzchar(this_term)) this_term else NA_character_)
+      }
+    }
+
+    if (length(go_ids) == 0L) return(NULL)
+
+    data.frame(
+      GO   = go_ids,
+      TERM = go_terms,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # First pass: extract all GO-term pairs and count output rows
+  parsed_list <- lapply(go_text, extract_go_pairs)
+  counts <- vapply(parsed_list, function(x) {
+    if (is.null(x)) 0L else nrow(x)
+  }, integer(1))
+
+  total_rows <- sum(counts)
+
+  if (total_rows == 0L) {
+    return(empty_out)
+  }
+
+  # Preallocate final vectors once
+  GENE <- character(total_rows)
+  ID   <- character(total_rows)
+  GO   <- character(total_rows)
+  TERM <- character(total_rows)
+
+  pos <- 1L
+
+  # Second pass: fill preallocated vectors
+  for (i in seq_along(parsed_list)) {
+    parsed <- parsed_list[[i]]
+    if (is.null(parsed) || nrow(parsed) == 0L) next
+
+    n_terms <- nrow(parsed)
+    idx <- pos:(pos + n_terms - 1L)
+
+    GENE[idx] <- gene_vec[i]
+    ID[idx]   <- id_vec[i]
+    GO[idx]   <- parsed$GO
+    TERM[idx] <- parsed$TERM
+
+    pos <- pos + n_terms
+  }
+
+  out <- data.frame(
+    GENE = GENE,
+    ID   = ID,
+    GO   = GO,
+    TERM = TERM,
+    stringsAsFactors = FALSE
+  )
+
+  rownames(out) <- NULL
+
+  if (deduplicate) {
+    out <- unique(out)
+    rownames(out) <- NULL
+  }
+
+  out
+}
+
+
+# Expand BP and MF properly -------------------------------
+
+# remove files for space
+rm(BP_MF_Terms,
+   matching_file)
+
+# Split merged_df into thirds  -------------------------------
+
+n <- nrow(merged_df)
+
+idx1 <- 1:floor(n / 3)
+idx2 <- (floor(n / 3) + 1):floor(2 * n / 3)
+idx3 <- (floor(2 * n / 3) + 1):n
+
+part1 <- merged_df[idx1, , drop = FALSE]
+part2 <- merged_df[idx2, , drop = FALSE]
+part3 <- merged_df[idx3, , drop = FALSE]
+
+rm(merged_df,
+   idx1,
+   idx2,
+   idx3,
+   n)
+
+# Expand GO:BP in chunks  -------------------------------
+
+BP_long_1 <- expand_go_column_mem(part1, "GO:BP", deduplicate = FALSE)
+BP_long_2 <- expand_go_column_mem(part2, "GO:BP", deduplicate = FALSE)
+BP_long_3 <- expand_go_column_mem(part3, "GO:BP", deduplicate = FALSE)
+
+BP_long <- unique(rbind(BP_long_1, BP_long_2, BP_long_3))
+rm(BP_long_1, BP_long_2, BP_long_3)
+BP_long <- unique(BP_long) # no duplicated detected
+
+# Expand GO:MF in chunks -------------------------------
+
+MF_long_1 <- expand_go_column_mem(part1, "GO:MF", deduplicate = FALSE)
+MF_long_2 <- expand_go_column_mem(part2, "GO:MF", deduplicate = FALSE)
+MF_long_3 <- expand_go_column_mem(part3, "GO:MF", deduplicate = FALSE)
+
+MF_long <- unique(rbind(MF_long_1, MF_long_2, MF_long_3))
+rm(MF_long_1, MF_long_2, MF_long_3)
+MF_long <- unique(MF_long) # no duplicates detected
+
+# Only make downstream objects after BP_long / MF_long are finished
+GENES_BP <- unique(BP_long[, c("GO", "GENE")])
+GENES_MF <- unique(MF_long[, c("GO", "GENE")])
+
+TERMs_BP <- unique(BP_long[, c("GO", "TERM")])
+TERMs_MF <- unique(MF_long[, c("GO", "TERM")])
+
+# remove redundant dfs now
+rm(part1,
+   part2,
+   part3,
+   BP_long,
+   MF_long)
+
+save.image(file = "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/data/BP_MF_long_extractions.Rdata")
+
+# load when needed
+  # load("C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/data/BP_MF_long_extractions.Rdata")
+
+```
+
+## Load DE data
+
+```{r data}
 # Import DEA results
-DE_results <- read.table("../Results/Multi_Stressor_all_Differential_Expression_Analysis_results.csv",
+getwd()
+DE_results <- read.table("chapter_3/results/Multi_Stressor_all_Differential_Expression_Analysis_results.csv",
                            header = T, 
                            sep = ',', 
                            stringsAsFactors = TRUE)
@@ -107,6 +407,7 @@ DE_results$gene <- gsub("path", "mrna", DE_results$gene) # Replacing "path" -> "
 ```
 
 ## Generate DEGs lists and ranked lists
+
 ```{r DEGs_and_Ranked_lists}
 # Diesel_only
 diesel_only_geneList = DE_results[,2]
@@ -176,88 +477,11 @@ DEGs <- DEGs[complete.cases(DEGs),]
 combined_Wald_DEGs <- as.vector(DEGs[,1])
 ```
 
-## Create GO term files
-```{r GO_terms}
-# Merge DEG Files:
-merged_df <- merge(matching_file, BP_MF_Terms, by = "ID")
-
-# Subset Dataframe
-merged_df <- subset(merged_df[, c("V1","ID","GO:BP","GO:MF")])
-
-# Change Variable names
-names(merged_df)[names(merged_df) == "V1"] <- "GENE"
-# Select BP column:
-BP <- merged_df[,c("GENE","ID","GO:BP")]
-BP <- BP[!apply(BP == "", 1, any), ]
-BP <- BP[!duplicated(BP), ]
-# Extract GO terms:
-GENES_BP <- BP
-GENES_BP$GO <- ""
-bracketed_rows <- grepl("\\[.*\\]", GENES_BP$`GO:BP`)
-GENES_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_BP$`GO:BP`[bracketed_rows])
-GENES_BP <- GENES_BP[, c("GO","GENE")]
-GENES_BP <- GENES_BP[!duplicated(GENES_BP), ]
-GENES_BP <- GENES_BP[complete.cases(GENES_BP),]
-
-## Extract Terms:
-TERMs_BP <- BP
-TERMs_BP$GO <- ""
-bracketed_rows <- grepl("\\[.*\\]", TERMs_BP$`GO:BP`)
-TERMs_BP$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_BP$`GO:BP`[bracketed_rows])
-TERMs_BP$`GO:BP`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_BP$`GO:BP`[bracketed_rows])
-TERMs_BP <- TERMs_BP[, c("GO","GO:BP")]
-TERMs_BP <- TERMs_BP[!duplicated(TERMs_BP), ]
-names(TERMs_BP)[names(TERMs_BP) == "GO:BP"] <- "GENENAMES_BP"
-TERMs_BP <- TERMs_BP[complete.cases(TERMs_BP),]
-
-# Select MF column:
-MF <- merged_df[,c("GENE","ID","GO:MF")]
-MF <- MF[!apply(MF == "", 1, any), ]
-MF <- MF[!duplicated(MF), ]
-# Extract GO terms:
-GENES_MF <- MF
-GENES_MF$GO <- ""
-bracketed_rows <- grepl("\\[.*\\]", GENES_MF$`GO:MF`)
-GENES_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", GENES_MF$`GO:MF`[bracketed_rows])
-GENES_MF <- GENES_MF[, c("GO","GENE")]
-GENES_MF <- GENES_MF[!duplicated(GENES_MF), ]
-GENES_MF <- GENES_MF[complete.cases(GENES_MF),]
-
-## Extract Terms:
-TERMs_MF <- MF
-TERMs_MF$GO <- ""
-bracketed_rows <- grepl("\\[.*\\]", TERMs_MF$`GO:MF`)
-TERMs_MF$GO[bracketed_rows] <- gsub(".*\\[(.*)\\].*", "\\1", TERMs_MF$`GO:MF`[bracketed_rows])
-TERMs_MF$`GO:MF`[bracketed_rows] <- gsub("\\[.*\\]", "", TERMs_MF$`GO:MF`[bracketed_rows])
-TERMs_MF <- TERMs_MF[, c("GO","GO:MF")]
-TERMs_MF <- TERMs_MF[!duplicated(TERMs_MF), ]
-names(TERMs_MF)[names(TERMs_MF) == "GO:MF"] <- "GENENAMES_MF"
-TERMs_MF <- TERMs_MF[complete.cases(TERMs_MF),]
-
-# Tidy-up Environment:
-# Tidy up environment..
-rm(MF,
-   BP,
-   BP_MF_Terms,
-   matching_file,
-   DEGs,
-   merged_df,
-   bracketed_rows
-)
-
-# Save Environment
-save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/ORA_prep.RData")
-
-```
-
 # Overrepresentation Analysis
 
 ```{r ORA}
-  # Load environment for analysis
-  load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/ORA_prep.RData")
-
 ## Looping script to perform all ORAs ----
-run_ORA_loop <- function(groups, out_dir = "../Results", assign_to_env = TRUE, env = .GlobalEnv) {
+run_ORA_loop <- function(groups, out_dir = "chapter_3/results/model_outputs", assign_to_env = TRUE, env = .GlobalEnv) {
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   res_list <- list()
   
@@ -331,12 +555,12 @@ groups <- c("diesel_only_Wald",
 res <- run_ORA_loop(groups, assign_to_env = TRUE)
 ```
 
-
 # Gene Set Enrichment Analysis
+
 ```{r GSEA}
 # Make loop
 run_GSEA_loop <- function(groups,
-                          out_dir = "../Results",
+                          out_dir = "chapter_3/results/model_outputs",
                           p_cutoff = 0.05,
                           assign_to_env = TRUE,
                           env = .GlobalEnv) {
@@ -445,6 +669,7 @@ save.image(file = "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-po
 # Combine and Save results files ----
 
 ## ORA
+
 ```{r combined_save_ORA}
 # results files names:
   # diesel_only_Wald_ORA_results
@@ -473,13 +698,11 @@ all_ORA_results <- bind_rows(
 )
 
 # Write.csv
-write.csv(all_ORA_results, "../Results/MS_all_ORA_results.csv", row.names = F)
-
-# load QuickGO version of the file
-ORA_results <- read.csv("../Results/MS_all_ORA_results_QuickGO.csv", header = T)
+write.csv(all_ORA_results, "chapter_3/results/model_outputs/MS_all_ORA_results.csv", row.names = F)
 ```
 
 ## GSEA
+
 ```{r combined_save_GSEA}
 # Adding contrast column
 # diesel_only_GSEA_results$contrast <- "diesel_only" # No Results
@@ -492,17 +715,14 @@ combined_GSEA_results$contrast <- "additive"
 # Combine
 all_GSEA_results <- bind_rows(#diesel_only_GSEA_results,
                          salinity_only_GSEA_results,
-                         interactive_only_GSEA_results,
+                         #interactive_only_GSEA_results,
                          diesel_added_GSEA_results,
                          salinity_added_GSEA_results,
                          combined_GSEA_results
 )
 
 # Save
-write.csv(all_GSEA_results, "../Results/MS_all_GSEA_results.csv", row.names = F)
-
-# Load QuickGO version
-GSEA_results <- read.csv("../Results/MS_all_GSEA_results_QuickGO.csv", header = T)
+write.csv(all_GSEA_results, "chapter_3/results/model_outputs/MS_all_GSEA_results.csv", row.names = F)
 ```
 
 # Plots
@@ -510,9 +730,10 @@ GSEA_results <- read.csv("../Results/MS_all_GSEA_results_QuickGO.csv", header = 
 ## ORA plots
 
 ### Attach LFC data to GO data
+
 ```{r ORA_plots}
 # only significant results
-ORA_results <- subset(ORA_results[ORA_results$p.adjust < 0.05,])
+ORA_results <- subset(all_ORA_results[all_ORA_results$p.adjust < 0.05,])
 ORA_results <- ORA_results[!apply(is.na(ORA_results), 1, all), ]
 
 # empty df to add data to:
@@ -533,7 +754,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_diesel_only_wald","LFC_diesel_o
   
   # ORA columns 
   ora_df         <- subset(ORA_results[ORA_results$contrast == "diesel_only",]) #                     # Change this to new contrast
-  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
   ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
   ora_genes_col  <- "geneID"         # nested gene list in each row
   
@@ -587,7 +808,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_salinity_only_wald","LFC_salini
   
   # ORA columns 
   ora_df         <- subset(ORA_results[ORA_results$contrast == "salinity_only",]) #                     # Change this to new contrast
-  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
   ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
   ora_genes_col  <- "geneID"         # nested gene list in each row
   
@@ -641,7 +862,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_diesel_added_wald","LFC_diesel_
   
   # ORA columns 
   ora_df         <- subset(ORA_results[ORA_results$contrast == "diesel_added",]) #                     # Change this to new contrast
-  ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+  ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
   ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
   ora_genes_col  <- "geneID"         # nested gene list in each row
   
@@ -695,7 +916,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_salinity_added_wald","LFC_salin
   
  # ORA columns
 ora_df         <- subset(ORA_results[ORA_results$contrast == "salinity_added",])
-ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
 ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
 ora_genes_col  <- "geneID"         # nested gene list in each row
 
@@ -752,7 +973,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_combined_wald","LFC_combined_wa
   
  # ORA columns
 ora_df         <- subset(ORA_results[ORA_results$contrast == "combined",])
-ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
 ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
 ora_genes_col  <- "geneID"         # nested gene list in each row
 
@@ -809,7 +1030,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_interactive_only_wald","LFC_int
   
  # ORA columns
 ora_df         <- subset(ORA_results[ORA_results$contrast == "interactive",])
-ora_term_col   <- if ("Description_QuickGO" %in% names(ora_df)) "Description_QuickGO" else "ID"
+ora_term_col   <- if ("Description" %in% names(ora_df)) "Description" else "ID"
 ora_padj_col   <- if ("p.adjust"   %in% names(ora_df)) "p.adjust"   else "pvalue"  # fallback
 ora_genes_col  <- "geneID"         # nested gene list in each row
 
@@ -856,7 +1077,6 @@ ora_long  <- attach_lfc(ora_df,  ora_term_col,  ora_genes_col,  lfc_map)
   ORA_plotting_data <- bind_rows(ORA_plotting_data, ora_plotdf)
 }
 ```
-
 
 ### Plot ORA
 
@@ -936,7 +1156,7 @@ p_boxes
 
 # Save plot
 ggsave(
-  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/ORA_boxplot.png",
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/ORA_boxplot.png",
   p_boxes,
   width = 246,
   height = 159,
@@ -951,7 +1171,7 @@ ggsave(
 
 ```{r GSEA_lfc_data}
 # only significant results
-GSEA_results <- subset(GSEA_results[GSEA_results$p.adjust < 0.05,])
+GSEA_results <- subset(all_GSEA_results[all_GSEA_results$p.adjust < 0.05,])
 GSEA_results <- GSEA_results[!apply(is.na(GSEA_results), 1, all), ]
 
 # empty df to add data to:
@@ -974,7 +1194,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_salinity_only_wald","LFC_salini
   
   # GSEA columns 
   GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "salinity_only",]) #              
-  GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+  GSEA_term_col   <- if ("Description" %in% names(GSEA_df)) "Description" else "ID"
   GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
   GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
   
@@ -1028,7 +1248,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_diesel_added_wald","LFC_diesel_
   
   # GSEA columns 
   GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "diesel_added",]) #                     # Change this to new contrast
-  GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+  GSEA_term_col   <- if ("Description" %in% names(GSEA_df)) "Description" else "ID"
   GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
   GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
   
@@ -1082,7 +1302,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_salinity_added_wald","LFC_salin
   
  # GSEA columns
 GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "salinity_added",])
-GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_term_col   <- if ("Description" %in% names(GSEA_df)) "Description" else "ID"
 GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
 GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
 
@@ -1139,7 +1359,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_combined_wald","LFC_combined_wa
   
  # GSEA columns
 GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "additive",])
-GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_term_col   <- if ("Description" %in% names(GSEA_df)) "Description" else "ID"
 GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
 GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
 
@@ -1196,7 +1416,7 @@ data_temp <- subset(DE_results[, c("gene", "padj_interactive_only_wald","LFC_int
   
  # GSEA columns
 GSEA_df         <- subset(GSEA_results[GSEA_results$contrast == "interactive",])
-GSEA_term_col   <- if ("Description_QuickGO" %in% names(GSEA_df)) "Description_QuickGO" else "ID"
+GSEA_term_col   <- if ("Description" %in% names(GSEA_df)) "Description" else "ID"
 GSEA_padj_col   <- if ("p.adjust"   %in% names(GSEA_df)) "p.adjust"   else "pvalue"  # fallback
 GSEA_genes_col <- "core_enrichment"  # nested gene list (leading edge)
 
@@ -1360,7 +1580,7 @@ final_GSEA_ridges <- ggplot(plot_df, aes(x = lfc, y = term)) +
 final_GSEA_ridges
 
 ggsave(
-  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Figures/Main Figures/final_GSEA_ridges.png",
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/final_GSEA_ridges.png",
   final_GSEA_ridges,
   width = 265,
   height = 159,
@@ -1369,8 +1589,8 @@ ggsave(
 )
 ```
 
-
 # Clean-up for saving environment
+
 ```{r clean_up}
 rm(BP_MF_Terms,
    data_temp,
@@ -1391,4 +1611,2758 @@ rm(BP_MF_Terms,
 )
 
 save.image("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_Enrichment_Analyses.RData")
+```
+
+# Get protein names for lists
+
+```{r get_protein_names}
+lowest_v11_by_v1 <- function(df) {
+  df |>
+    dplyr::group_by(V1) |>
+    dplyr::slice_min(order_by = V11, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup()
+}
+
+result <- lowest_v13_by_v1(matching_file)
+
+# function to get accession ids for an input list
+get_uniprot_ids <- function(df, input_values) {
+  input_values <- unlist(input_values)
+
+  output <- df$V13[df$V1 %in% input_values]
+
+  cat(output, sep = "\n")
+}
+
+get_uniprot_ids(result, c("evm.utg729.38"))
+```
+
+# Semantic Clustering
+
+# Need to apply semantic clustering
+
+```{r semantic_clustering}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(purrr)
+  library(tibble)
+  library(cluster)
+  library(GOSemSim)
+  library(org.Aequina.eg.db)
+  library(ggplot2)
+  library(ggVennDiagram)
+  library(stringr)
+})
+
+# 0. User options # -----------------------------
+OrgDb <- org.Aequina.eg.db
+keytype_used <- "GID"
+max_k <- 40
+
+# 1. Helper functions-----------------------------
+
+standardise_ontology <- function(x) {
+  case_when(
+    x %in% c("BP", "biological_process", "biological_processes") ~ "biological_processes",
+    x %in% c("MF", "molecular_function", "molecular_functions") ~ "molecular_functions",
+    x %in% c("CC", "cellular_component", "cellular_components") ~ "cellular_components",
+    TRUE ~ as.character(x)
+  )
+}
+
+first_non_missing <- function(x) {
+  x <- x[!is.na(x) & x != ""]
+  if (length(x) == 0) NA_character_ else x[1]
+}
+
+best_padj <- function(x) {
+  if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
+}
+
+prep_enrichment <- function(df, method_name) {
+  df <- as_tibble(df)
+
+  if (!"Description_QuickGO" %in% names(df)) {
+    df$Description_QuickGO <- df$Description
+  }
+
+  if (!"contrast" %in% names(df)) {
+    df$contrast <- NA_character_
+  }
+
+  df %>%
+    mutate(
+      ID = as.character(ID),
+      Description = as.character(Description),
+      Description_QuickGO = as.character(Description_QuickGO),
+      ontology = standardise_ontology(GO),
+      p.adjust = as.numeric(p.adjust),
+      contrast = as.character(contrast),
+      method = method_name
+    )
+}
+
+make_sim_matrix <- function(term_ids, sem_data) {
+  sim <- termSim(
+    t1 = term_ids,
+    t2 = term_ids,
+    semData = sem_data,
+    method = "Wang"
+  )
+
+  sim[is.na(sim)] <- 0
+  sim <- pmax(pmin(sim, 1), 0)
+  diag(sim) <- 1
+
+  sim
+}
+
+fit_semantic_clusters <- function(term_ids, sem_data, max_k = 40) {
+  term_ids <- unique(term_ids)
+  n_terms <- length(term_ids)
+
+  if (n_terms == 0) {
+    return(list(
+      sim = NULL,
+      hc = NULL,
+      k_eval = tibble::tibble(),
+      best_k = NA_integer_,
+      clusters = integer()
+    ))
+  }
+
+  sim <- make_sim_matrix(term_ids, sem_data)
+
+  if (n_terms == 1) {
+    return(list(
+      sim = sim,
+      hc = NULL,
+      k_eval = tibble::tibble(k = 1, avg_silhouette = NA_real_),
+      best_k = 1,
+      clusters = setNames(1L, term_ids)
+    ))
+  }
+
+  dist_mat <- stats::as.dist(1 - sim)
+  hc <- stats::hclust(dist_mat, method = "average")
+
+  if (n_terms == 2) {
+    clusters <- stats::cutree(hc, k = 2)
+
+    return(list(
+      sim = sim,
+      hc = hc,
+      k_eval = tibble::tibble(k = 2, avg_silhouette = NA_real_),
+      best_k = 2,
+      clusters = clusters
+    ))
+  }
+
+  k_grid <- 2:min(max_k, n_terms - 1)
+
+  k_eval <- purrr::map_dfr(k_grid, function(k) {
+    cl <- stats::cutree(hc, k = k)
+    sil <- cluster::silhouette(cl, dist_mat)
+    sizes <- table(cl)
+
+    tibble::tibble(
+      k = k,
+      avg_silhouette = mean(sil[, "sil_width"]),
+      n_singletons = sum(sizes == 1),
+      prop_singletons = mean(sizes == 1)
+    )
+  })
+
+  best_k <- k_eval %>%
+    dplyr::filter(!is.na(avg_silhouette)) %>%
+    dplyr::arrange(
+      dplyr::desc(avg_silhouette),
+      n_singletons,
+      k
+    ) %>%
+    dplyr::slice_head(n = 1) %>%
+    dplyr::pull(k)
+
+  clusters <- stats::cutree(hc, k = best_k)
+
+  list(
+    sim = sim,
+    hc = hc,
+    k_eval = k_eval,
+    best_k = best_k,
+    clusters = clusters
+  )
+}
+
+add_representative_go <- function(df, representative_terms_df) {
+  df <- as_tibble(df)
+
+  df %>%
+    mutate(
+      ID = as.character(ID),
+      ontology = standardise_ontology(GO)
+    ) %>%
+    left_join(
+      representative_terms_df,
+      by = c("ontology", "ID")
+    )
+}
+
+make_go_sets <- function(df, ontology_name, source_cols = c("contrast", "method")) {
+  df %>%
+    dplyr::filter(ontology == ontology_name) %>%
+    dplyr::mutate(
+      source = do.call(
+        paste,
+        c(dplyr::across(dplyr::all_of(source_cols)), sep = " | ")
+      ),
+      source = stringr::str_replace_all(source, "_", " ")
+    ) %>%
+    dplyr::distinct(source, ID) %>%
+    split(.$source) %>%
+    purrr::map(~ .x$ID)
+}
+
+
+plot_venn_if_possible <- function(
+    go_sets,
+    fill_high = "#4c43e8",
+    selected_sets = NULL,
+    max_sets = 7,
+    label_size = 4,
+    category_size = 3
+) {
+  go_sets <- go_sets[lengths(go_sets) > 0]
+
+  if (!is.null(selected_sets)) {
+    go_sets <- go_sets[names(go_sets) %in% selected_sets]
+  }
+
+  n_sets <- length(go_sets)
+
+  if (n_sets < 2) {
+    stop("Need at least 2 non-empty sets for a Venn diagram.")
+  }
+
+  if (n_sets > max_sets) {
+    stop(
+      paste0(
+        "There are ", n_sets, " sets. ggVennDiagram is only practical up to ",
+        max_sets, " sets.\n\nAvailable sets are:\n",
+        paste(names(go_sets), collapse = "\n")
+      )
+    )
+  }
+
+  ggVennDiagram::ggVennDiagram(
+    go_sets,
+    category.names = names(go_sets),
+    set_color = "black",
+    set_size = category_size,
+    label_alpha = 0,
+    label_size = label_size
+  ) +
+    ggplot2::scale_fill_gradient(low = "white", high = fill_high) +
+    ggplot2::theme_void(base_size = 14) +
+    ggplot2::theme(
+      legend.position = "none",
+      plot.margin = ggplot2::margin(20, 20, 20, 20)
+    )
+}
+
+plot_venn_if_possible <- function(
+    go_sets,
+    fill_high = "#4c43e8",
+    selected_sets = NULL,
+    max_sets = 7,
+    label_size = 4,
+    category_size = 3
+) {
+  go_sets <- go_sets[lengths(go_sets) > 0]
+
+  if (!is.null(selected_sets)) {
+    go_sets <- go_sets[names(go_sets) %in% selected_sets]
+  }
+
+  n_sets <- length(go_sets)
+
+  if (n_sets < 2) {
+    stop("Need at least 2 non-empty sets for a Venn diagram.")
+  }
+
+  if (n_sets > max_sets) {
+    stop(
+      paste0(
+        "There are ", n_sets, " sets. ggVennDiagram is only practical up to ",
+        max_sets, " sets.\n\nAvailable sets are:\n",
+        paste(names(go_sets), collapse = "\n")
+      )
+    )
+  }
+
+  ggVennDiagram::ggVennDiagram(
+    go_sets,
+    category.names = names(go_sets),
+    set_color = "black",
+    set_size = category_size,
+    label_alpha = 0,
+    label_size = label_size
+  ) +
+    ggplot2::scale_fill_gradient(low = "white", high = fill_high) +
+    ggplot2::theme_void(base_size = 14) +
+    ggplot2::theme(
+      legend.position = "none",
+      plot.margin = ggplot2::margin(20, 20, 20, 20)
+    )
+}
+
+# 2. Prepare and combine ORA + GSEA results -----------------------------
+
+all_enrichment_results <- bind_rows(
+  prep_enrichment(all_ORA_results,  method_name = "ORA"),
+  prep_enrichment(all_GSEA_results, method_name = "GSEA")
+) %>%
+  mutate(enrichment_row_id = row_number())
+
+all_enrichment_results_minimal <- all_enrichment_results %>%
+  dplyr::select(
+    enrichment_row_id,
+    method,
+    contrast,
+    ontology,
+    ID,
+    Description,
+    Description_QuickGO,
+    p.adjust
+  )
+
+# 3. Create unique GO term table -----------------------------
+
+unique_terms <- all_enrichment_results_minimal %>%
+  group_by(ontology, ID) %>%
+  summarise(
+    Description = first_non_missing(Description),
+    Description_QuickGO = first_non_missing(Description_QuickGO),
+    best_p.adjust = best_padj(p.adjust),
+    .groups = "drop"
+  )
+
+
+# 4. Build ontology-specific GOSemSim objects -----------------------------
+
+ontology_code <- c(
+  biological_processes = "BP",
+  molecular_functions = "MF",
+  cellular_components = "CC"
+)
+
+present_ontologies <- intersect(
+  unique(unique_terms$ontology),
+  names(ontology_code)
+)
+
+sem_data <- map(
+  setNames(ontology_code[present_ontologies], present_ontologies),
+  ~ godata(
+    OrgDb,
+    keytype = keytype_used,
+    ont = .x,
+    computeIC = FALSE
+  )
+)
+
+# 5. Fit semantic clusters by ontology -----------------------------
+
+semantic_fits <- purrr::imap(sem_data, function(sem_obj, ontology_name) {
+  term_ids <- unique_terms %>%
+    dplyr::filter(ontology == ontology_name) %>%
+    dplyr::pull(ID)
+
+  fit_semantic_clusters(
+    term_ids = term_ids,
+    sem_data = sem_obj,
+    max_k = max_k
+  )
+})
+
+best_k_table <- imap_dfr(semantic_fits, function(fit, ontology_name) {
+  tibble(
+    ontology = ontology_name,
+    n_terms = length(fit$clusters),
+    best_k = fit$best_k
+  )
+})
+
+print(best_k_table)
+
+k_eval_table <- imap_dfr(semantic_fits, function(fit, ontology_name) {
+  fit$k_eval %>%
+    mutate(
+      ontology = ontology_name,
+      best_k = fit$best_k,
+      .before = 1
+    )
+})
+
+print(k_eval_table, n = Inf)
+
+# Optional k-selection plot
+p_k_selection <- k_eval_table %>%
+  filter(!is.na(avg_silhouette)) %>%
+  ggplot(aes(x = k, y = avg_silhouette)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(
+    aes(xintercept = best_k),
+    linetype = "dashed",
+    colour = "grey50"
+  ) +
+  facet_wrap(~ ontology, scales = "free_x") +
+  labs(
+    x = "k tested",
+    y = "Average silhouette",
+    title = "Semantic cluster k selection"
+  ) +
+  theme_classic(base_size = 12)
+
+p_k_selection
+
+# 6. Assign clusters to GO terms -----------------------------
+
+term_clusters <- imap_dfr(semantic_fits, function(fit, ontology_name) {
+  tibble(
+    ontology = ontology_name,
+    ID = names(fit$clusters),
+    semantic_cluster = as.integer(fit$clusters),
+    semantic_cluster_id = paste0(ontology_code[[ontology_name]], "_", semantic_cluster)
+  )
+})
+
+unique_terms_clustered <- unique_terms %>%
+  left_join(
+    term_clusters,
+    by = c("ontology", "ID")
+  )
+
+# 7. Pick representative GO term per semantic cluster  -----------------------------
+#    Representative = lowest adjusted p-value
+
+cluster_representatives <- unique_terms_clustered %>%
+  filter(!is.na(semantic_cluster)) %>%
+  group_by(ontology, semantic_cluster, semantic_cluster_id) %>%
+  slice_min(
+    order_by = best_p.adjust,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  ungroup() %>%
+  transmute(
+    ontology,
+    semantic_cluster,
+    semantic_cluster_id,
+    representative_ID = ID,
+    representative_Description = Description,
+    representative_Description_QuickGO = Description_QuickGO
+  )
+
+term_to_representative <- unique_terms_clustered %>%
+  left_join(
+    cluster_representatives,
+    by = c("ontology", "semantic_cluster", "semantic_cluster_id")
+  ) %>%
+  mutate(
+    representative_ID = coalesce(representative_ID, ID),
+    representative_Description = coalesce(representative_Description, Description),
+    representative_Description_QuickGO = coalesce(
+      representative_Description_QuickGO,
+      Description_QuickGO
+    )
+  )
+
+# Useful mapping table for joining to any later dataframe
+representative_terms_df <- term_to_representative %>%
+  transmute(
+    ontology,
+    ID,
+    original_GO = Description_QuickGO,
+    semantic_cluster,
+    semantic_cluster_id,
+    representative_ID,
+    Representative_GO = representative_Description_QuickGO
+  ) %>%
+  distinct()
+
+# 8. Replace original GO terms with representative clustered terms  -----------------------------
+
+all_enrichment_results_replaced <- all_enrichment_results_minimal %>%
+  left_join(
+    term_to_representative %>%
+      dplyr::select(
+        ontology,
+        ID,
+        semantic_cluster,
+        semantic_cluster_id,
+        representative_ID,
+        representative_Description,
+        representative_Description_QuickGO
+      ),
+    by = c("ontology", "ID")
+  ) %>%
+  transmute(
+    enrichment_row_id,
+    method,
+    contrast,
+    ontology,
+
+    original_ID = ID,
+    original_Description = Description,
+    original_Description_QuickGO = Description_QuickGO,
+
+    semantic_cluster,
+    semantic_cluster_id,
+
+    ID = representative_ID,
+    Description = representative_Description,
+    Description_QuickGO = representative_Description_QuickGO,
+
+    p.adjust
+  )
+
+# Collapse duplicate representative terms within each contrast/method/ontology
+all_enrichment_results_collapsed <- all_enrichment_results_replaced %>%
+  distinct(
+    contrast,
+    method,
+    ontology,
+    ID,
+    .keep_all = TRUE
+  )
+
+# 9. Cluster summary table  -----------------------------
+
+cluster_summary <- term_to_representative %>%
+  group_by(
+    ontology,
+    semantic_cluster,
+    semantic_cluster_id,
+    representative_ID,
+    representative_Description_QuickGO
+  ) %>%
+  summarise(
+    n_terms_in_cluster = n(),
+    best_p.adjust = best_padj(best_p.adjust),
+    clustered_GO_IDs = paste(sort(unique(ID)), collapse = "; "),
+    clustered_GO_terms = paste(sort(unique(Description_QuickGO)), collapse = " | "),
+    .groups = "drop"
+  ) %>%
+  arrange(ontology, semantic_cluster)
+
+print(cluster_summary, n = Inf)
+
+# 10. Intersection table after semantic collapsing  -----------------------------
+
+intersection_df <- all_enrichment_results_collapsed %>%
+  mutate(
+    source = paste(
+      str_replace_all(contrast, "_", " "),
+      method,
+      sep = " | "
+    )
+  ) %>%
+  group_by(ontology, ID) %>%
+  summarise(
+    Description_QuickGO = first_non_missing(Description_QuickGO),
+    groups_intersecting = paste(sort(unique(source)), collapse = " || "),
+    n_groups = n_distinct(source),
+    .groups = "drop"
+  ) %>%
+  filter(n_groups > 1) %>%
+  arrange(ontology, desc(n_groups), ID)
+
+print(intersection_df, n = Inf)
+
+# 11. Add representative GO terms back to original ORA/GSEA results  -----------------------------
+
+all_ORA_results_semantic <- add_representative_go(
+  all_ORA_results,
+  representative_terms_df
+)
+
+all_GSEA_results_semantic <- add_representative_go(
+  all_GSEA_results,
+  representative_terms_df
+)
+
+
+# 12. Make new enrichment plots with semantic names -----------------------------------
+
+# Attach LFC data to semantically clustered ORA/GSEA results # ======================
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(stringr)
+  library(ggplot2)
+  library(ggridges)
+  library(scales)
+})
+
+# 1. Contrast-to-LFC lookup table  -----------------------------
+contrast_lfc_lookup <- tibble::tribble(
+  ~contrast,          ~lfc_col,
+  "diesel_only",      "LFC_diesel_only_wald",
+  "diesel_added",     "LFC_diesel_added_wald",
+  "salinity_only",    "LFC_salinity_only_wald",
+  "salinity_added",   "LFC_salinity_added_wald",
+  "combined",         "LFC_combined_wald",
+  "additive",         "LFC_combined_wald",
+  "interactive",      "LFC_interactive_only_wald"
+)
+
+contrast_levels <- c(
+  "diesel_only",
+  "diesel_added",
+  "salinity_only",
+  "salinity_added",
+  "combined",
+  "additive",
+  "interactive"
+)
+
+contrast_labels <- c(
+  diesel_only    = "Diesel",
+  diesel_added   = "+ Diesel",
+  salinity_only  = "Salinity",
+  salinity_added = "+ Salinity",
+  combined       = "Additive",
+  additive       = "Additive",
+  interactive    = "Interactive"
+)
+
+# 2. Helper functions  -----------------------------
+pick_term_column <- function(df) {
+  possible_cols <- c(
+    "Representative_GO",
+    "representative_Description_QuickGO",
+    "Description_QuickGO",
+    "Description",
+    "ID"
+  )
+
+  term_col <- possible_cols[possible_cols %in% names(df)][1]
+
+  if (is.na(term_col)) {
+    stop("No suitable GO term column found.")
+  }
+
+  term_col
+}
+
+split_gene_column <- function(df, genes_col, split_pattern = "[,;/\\|\\s]+") {
+  df %>%
+    dplyr::mutate(
+      genes = stringr::str_split(.data[[genes_col]], split_pattern)
+    ) %>%
+    tidyr::unnest(genes) %>%
+    dplyr::mutate(
+      gene = stringr::str_trim(genes)
+    ) %>%
+    dplyr::filter(!is.na(gene), gene != "") %>%
+    dplyr::select(-genes)
+}
+
+make_lfc_map <- function(DE_results, lfc_col, gene_col = "gene") {
+  if (!lfc_col %in% names(DE_results)) {
+    stop(paste("Missing LFC column in DE_results:", lfc_col))
+  }
+
+  DE_results %>%
+    dplyr::transmute(
+      gene = .data[[gene_col]],
+      lfc = as.numeric(.data[[lfc_col]])
+    ) %>%
+    dplyr::distinct()
+}
+
+make_enrichment_lfc_plotting_data <- function(
+    enrichment_df,
+    DE_results,
+    genes_col,
+    method_name,
+    sig_cutoff = 0.05,
+    gene_col = "gene",
+    contrast_lookup = contrast_lfc_lookup
+) {
+  term_col <- pick_term_column(enrichment_df)
+
+  if (!genes_col %in% names(enrichment_df)) {
+    stop(paste("Missing gene-list column:", genes_col))
+  }
+
+  enrichment_sig <- enrichment_df %>%
+    dplyr::filter(!is.na(p.adjust), p.adjust < sig_cutoff) %>%
+    dplyr::mutate(
+      term = as.character(.data[[term_col]]),
+      original_GO_ID = as.character(ID),
+      original_GO_term = as.character(Description),
+      ontology = dplyr::case_when(
+        "ontology" %in% names(.) ~ as.character(ontology),
+        "GO" %in% names(.) ~ as.character(GO),
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    dplyr::filter(!is.na(term), term != "")
+
+  purrr::map_dfr(seq_len(nrow(contrast_lookup)), function(i) {
+    contrast_i <- contrast_lookup$contrast[i]
+    lfc_col_i  <- contrast_lookup$lfc_col[i]
+
+    enrichment_i <- enrichment_sig %>%
+      dplyr::filter(contrast == contrast_i)
+
+    if (nrow(enrichment_i) == 0) {
+      return(tibble::tibble())
+    }
+
+    if (!lfc_col_i %in% names(DE_results)) {
+      warning(paste("Skipping", contrast_i, "- missing column:", lfc_col_i))
+      return(tibble::tibble())
+    }
+
+    lfc_map <- make_lfc_map(
+      DE_results = DE_results,
+      lfc_col = lfc_col_i,
+      gene_col = gene_col
+    )
+
+    enrichment_i %>%
+      dplyr::select(
+        contrast,
+        ontology,
+        term,
+        original_GO_ID,
+        original_GO_term,
+        p.adjust,
+        dplyr::all_of(genes_col)
+      ) %>%
+      split_gene_column(genes_col = genes_col) %>%
+      dplyr::distinct(
+        contrast,
+        ontology,
+        term,
+        original_GO_ID,
+        gene,
+        .keep_all = TRUE
+      ) %>%
+      dplyr::left_join(lfc_map, by = "gene") %>%
+      dplyr::mutate(method = method_name)
+  })
+}
+
+# ORA plotting data  ---------------------
+ORA_plotting_data <- make_enrichment_lfc_plotting_data(
+  enrichment_df = all_ORA_results_semantic,
+  DE_results = DE_results,
+  genes_col = "geneID",
+  method_name = "ORA",
+  sig_cutoff = 0.05
+)
+
+ORA_plotting_data <- ORA_plotting_data %>%
+  dplyr::filter(!is.na(lfc))
+
+dplyr::glimpse(ORA_plotting_data)
+
+# plot ORA -----------------
+ora_term_levels <- ORA_plotting_data %>%
+  dplyr::group_by(term) %>%
+  dplyr::summarise(
+    n_contrasts = dplyr::n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    median_lfc = median(lfc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(desc(n_contrasts), desc(mean_abs_lfc), median_lfc, term) %>%
+  dplyr::pull(term)
+
+ORA_plot_df <- ORA_plotting_data %>%
+  dplyr::mutate(
+    term = factor(term, levels = rev(ora_term_levels)),
+    contrast = factor(contrast, levels = contrast_levels)
+  ) %>%
+  dplyr::filter(!is.na(contrast))
+
+p_ORA_boxes <- ggplot(
+  ORA_plot_df,
+  aes(x = lfc, y = term)
+) +
+  geom_boxplot(
+    outlier.size = 0.6,
+    width = 0.6,
+    colour = "grey30",
+    fill = "grey88"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.6,
+    colour = "grey60"
+  ) +
+  facet_grid(
+    cols = vars(contrast),
+    scales = "free_x",
+    labeller = labeller(contrast = contrast_labels)
+  ) +
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width = 80)
+  ) +
+  labs(
+    x = "Shrunken log2 fold-change (LFC)",
+    y = NULL
+  ) +
+  theme_bw(base_size = 8) +
+  theme(
+    strip.background = element_rect(fill = "white"),
+    strip.text.x = element_text(face = "bold", size = 8),
+    axis.text.y = element_text(size = 10, colour = "black"),
+    axis.text.x = element_text(size = 6.5, colour = "black"),
+    panel.grid.minor = element_blank(),
+    panel.spacing.x = unit(0.5, "lines"),
+    plot.margin = margin(5.5, 10, 5.5, 30)
+  )
+
+p_ORA_boxes
+
+ggsave(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/ORA_boxplot_semantic_representatives.png",
+  p_ORA_boxes,
+  width = 246,
+  height = 159,
+  units = "mm",
+  dpi = 300
+)
+
+## GSEA plotting -----------
+
+# Calculate whether each GSEA ridge peaks below or above zero -----------
+
+GSEA_plotting_data <- make_enrichment_lfc_plotting_data(
+  enrichment_df = all_GSEA_results_semantic,
+  DE_results = DE_results,
+  genes_col = "core_enrichment",
+  method_name = "GSEA",
+  sig_cutoff = 0.05
+)
+
+GSEA_plotting_data <- GSEA_plotting_data %>%
+  dplyr::filter(!is.na(lfc))
+
+dplyr::glimpse(GSEA_plotting_data)
+
+gsea_term_levels <- GSEA_plotting_data %>%
+  dplyr::group_by(term) %>%
+  dplyr::summarise(
+    n_contrasts = dplyr::n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    median_lfc = median(lfc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(desc(n_contrasts), desc(mean_abs_lfc), median_lfc, term) %>%
+  dplyr::pull(term)
+
+
+# Adjust these if you want more or less trimming
+lfc_limits <- quantile(
+  GSEA_plot_df$lfc,
+  probs = c(0.01, 0.999),
+  na.rm = TRUE
+)
+
+GSEA_plot_df_trimmed <- GSEA_plot_df %>%
+  dplyr::filter(
+    !is.na(lfc),
+    lfc >= lfc_limits[1],
+    lfc <= lfc_limits[2]
+  )
+
+get_density_peak <- function(x) {
+  x <- x[!is.na(x)]
+
+  if (length(unique(x)) < 2) {
+    return(NA_real_)
+  }
+
+  d <- density(x)
+  d$x[which.max(d$y)]
+}
+
+ridge_peak_df <- GSEA_plot_df_trimmed %>%
+  dplyr::group_by(contrast, term) %>%
+  dplyr::summarise(
+    peak_lfc = get_density_peak(lfc),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    peak_direction = dplyr::case_when(
+      is.na(peak_lfc) ~ "Peak unavailable",
+      peak_lfc < 0   ~ "Peak < 0",
+      peak_lfc > 0   ~ "Peak > 0",
+      TRUE           ~ "Peak = 0"
+    )
+  )
+
+GSEA_plot_df_coloured <- GSEA_plot_df_trimmed %>%
+  dplyr::left_join(
+    ridge_peak_df,
+    by = c("contrast", "term")
+  )
+
+nes_direction_df <- all_GSEA_results_semantic %>%
+  dplyr::select(
+    contrast,
+    term = Description,
+    NES
+  ) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(
+    NES_direction = dplyr::case_when(
+      NES > 0  ~ "Positive NES",
+      NES < 0  ~ "Negative NES",
+      NES == 0 ~ "NES = 0",
+      TRUE     ~ "NES unavailable"
+    )
+  )
+
+GSEA_plot_df_coloured <- GSEA_plot_df_trimmed %>%
+  dplyr::left_join(
+    nes_direction_df,
+    by = c("contrast", "term")
+  )
+
+final_GSEA_ridges <- ggplot(
+  GSEA_plot_df_coloured,
+  aes(
+    x = lfc,
+    y = term,
+    fill = NES_direction,
+    colour = NES_direction
+  )
+) +
+  ggridges::geom_density_ridges(
+    scale = 0.9,
+    rel_min_height = 0.01,
+    linewidth = 0.3,
+    alpha = 0.85,
+    position = position_nudge(y = -0.25)
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = 2,
+    linewidth = 0.35,
+    colour = "grey30"
+  ) +
+  facet_grid(
+    cols = vars(contrast),
+    scales = "free_x",
+    labeller = labeller(contrast = contrast_labels)
+  ) +
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width = 100)
+  ) +
+  scale_x_continuous(
+    breaks = scales::pretty_breaks(n = 5),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Negative NES" = "#4C78A8",
+      "Positive NES" = "#E45756",
+      "NES = 0" = "grey75",
+      "NES unavailable" = "grey85"
+    ),
+    name = "NES direction"
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Negative NES" = "#14467D",
+      "Positive NES" = "#BD1F1E",
+      "NES = 0" = "grey45",
+      "NES unavailable" = "grey65"
+    ),
+    name = "NES direction"
+  ) +
+  labs(
+    x = expression(log[2] * " fold-change (LFC, ashr)"),
+    y = NULL
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    strip.background = element_rect(fill = "grey95", colour = "black", linewidth = 0.4),
+    strip.text.x = element_text(face = "bold", size = 10),
+    axis.text.y = element_text(size = 9, colour = "black", lineheight = 0.9),
+    axis.text.x = element_text(size = 8, colour = "black"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    legend.position = "bottom",
+    legend.title = element_text(size = 8, face = "bold"),
+    legend.text = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(colour = "grey85", linewidth = 0.25),
+    panel.grid.major.x = element_line(colour = "grey88", linewidth = 0.25),
+    panel.spacing.x = unit(0.5, "lines"),
+    plot.margin = margin(5.5, 10, 5.5, 30)
+  )
+
+final_GSEA_ridges
+
+ggsave(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/GSEA_ridges_semantic_representatives.png",
+  final_GSEA_ridges,
+  width = 265,
+  height = 180,
+  units = "mm",
+  dpi = 1200
+)
+
+getwd()
+write.csv(GSEA_plot_df_trimmed, "GSEA_plot_df_trimmed.csv")
+write.csv(GSEA_results, "GSEA_results.csv")
+
+nes_lookup <- GSEA_results %>%
+  dplyr::select(contrast, ID, NES) %>%
+  distinct()
+
+gsea_plot_df_joined <- GSEA_plot_df_trimmed %>%
+  left_join(
+    nes_lookup,
+    by = join_by(contrast, original_GO_ID == ID),
+    relationship = "many-to-one"
+  )
+
+# wc
+# Should be the same number of rows as the original plot dataframe
+nrow(GSEA_plot_df_trimmed)
+nrow(gsea_plot_df_joined)
+
+# Should be 0 for your current files
+sum(is.na(gsea_plot_df_joined$NES))
+
+# save
+write_csv(gsea_plot_df_joined, "GSEA_plot_df_trimmed_with_NES.csv")
+
+# Read joined file with NES already included ----
+GSEA_plot_df_coloured <- read_csv(
+  "GSEA_plot_df_trimmed_with_NES.csv",
+  show_col_types = FALSE
+) %>%
+  dplyr::select(-any_of("...1")) %>%
+  mutate(
+    NES = as.numeric(NES),
+    NES_direction = case_when(
+      NES > 0  ~ "Positive NES",
+      NES < 0  ~ "Negative NES",
+      NES == 0 ~ "NES = 0",
+      TRUE     ~ "NES unavailable"
+    ),
+    NES_direction = factor(
+      NES_direction,
+      levels = c("Positive NES", "Negative NES", "NES = 0", "NES unavailable")
+    )
+  )
+
+GSEA_plot_df_coloured %>%
+  summarise(
+    n_rows = n(),
+    missing_NES = sum(is.na(NES)),
+    missing_NES_direction = sum(is.na(NES_direction)),
+    positive_NES = sum(NES > 0, na.rm = TRUE),
+    negative_NES = sum(NES < 0, na.rm = TRUE),
+    zero_NES = sum(NES == 0, na.rm = TRUE)
+  )
+
+# Alphabetical ordering from top to bottom ----
+term_levels_alpha <- GSEA_plot_df_coloured %>%
+  dplyr::distinct(term) %>%
+  dplyr::arrange(stringr::str_to_lower(term)) %>%
+  dplyr::pull(term)
+
+GSEA_plot_df_coloured_alpha <- GSEA_plot_df_coloured %>%
+  dplyr::mutate(
+    term_alpha = factor(
+      term,
+      levels = rev(term_levels_alpha)
+    )
+  )
+
+# Set y-axis label wrapping width ----
+y_label_width <- 50
+
+# plot
+final_GSEA_ridges <- ggplot(
+  GSEA_plot_df_coloured_alpha,
+  aes(
+    x = lfc,
+    y = term_alpha,
+    fill = NES_direction,
+    colour = NES_direction
+  )
+) +
+  ggridges::geom_density_ridges(
+    scale = 0.9,
+    rel_min_height = 0.01,
+    linewidth = 0.3,
+    alpha = 0.85,
+    position = position_nudge(y = -0.25)
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = 2,
+    linewidth = 0.35,
+    colour = "grey30"
+  ) +
+  facet_grid(
+    cols = vars(contrast),
+    scales = "free_x",
+    labeller = labeller(contrast = contrast_labels)
+  ) +
+  scale_y_discrete(
+  labels = function(x) stringr::str_wrap(x, width = y_label_width)
+  ) +
+  scale_x_continuous(
+    breaks = scales::pretty_breaks(n = 5),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Negative NES" = "#4C78A8",
+      "Positive NES" = "#E45756",
+      "NES = 0" = "grey75",
+      "NES unavailable" = "grey85"
+    ),
+    name = "NES direction"
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Negative NES" = "#14467D",
+      "Positive NES" = "#BD1F1E",
+      "NES = 0" = "grey45",
+      "NES unavailable" = "grey65"
+    ),
+    name = "NES direction"
+  ) +
+  labs(
+    x = expression(log[2] * " fold-change (LFC, ashr)"),
+    y = NULL
+  ) +
+  theme_bw(base_size = 10) +
+  theme(
+    strip.background = element_rect(fill = "grey95", colour = "black", linewidth = 0.4),
+    strip.text.x = element_text(face = "bold", size = 10),
+    axis.text.y = element_text(size = 9, colour = "black", lineheight = 0.9),
+    axis.text.x = element_text(size = 8, colour = "black"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    legend.position = "bottom",
+    legend.title = element_text(size = 8, face = "bold"),
+    legend.text = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(colour = "grey85", linewidth = 0.25),
+    panel.grid.major.x = element_line(colour = "grey88", linewidth = 0.25),
+    panel.spacing.x = unit(0.5, "lines"),
+    plot.margin = margin(5.5, 10, 5.5, 30)
+  )
+
+final_GSEA_ridges
+
+ggsave(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/final_GSEA_ridges.png",
+  final_GSEA_ridges,
+  width = 280,
+  height = 280,
+  units = "mm",
+  dpi = 600
+)
+
+# Jittered ORA dotplot -----
+# ORA dotplot with jittered points
+# All contrasts/contexts on one panel
+# Points coloured by contrast
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+# Order GO terms by how many contrasts they appear in, then by mean absolute LFC
+ora_term_levels <- ORA_plotting_data %>%
+  filter(!is.na(lfc)) %>%
+  group_by(term) %>%
+  summarise(
+    n_contrasts = n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    median_lfc = median(lfc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_contrasts), desc(mean_abs_lfc), median_lfc, term) %>%
+  pull(term)
+
+ORA_dotplot_df <- ORA_plotting_data %>%
+  filter(!is.na(lfc)) %>%
+  mutate(
+    term = factor(term, levels = rev(ora_term_levels)),
+    contrast = factor(
+      contrast,
+      levels = c(
+        "diesel_only",
+        "diesel_added",
+        "salinity_only",
+        "salinity_added",
+        "combined",
+        "additive",
+        "interactive"
+      )
+    )
+  ) %>%
+  filter(!is.na(contrast))
+
+contrast_labels <- c(
+  diesel_only    = "Diesel",
+  diesel_added   = "+ Diesel",
+  salinity_only  = "Salinity",
+  salinity_added = "+ Salinity",
+  combined       = "Additive",
+  additive       = "Additive",
+  interactive    = "Interactive"
+)
+
+lfc_breaks <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  max_abs <- max(abs(rng))
+
+  step <- dplyr::case_when(
+    max_abs <= 2  ~ 0.5,
+    max_abs <= 5  ~ 1,
+    max_abs <= 10 ~ 2,
+    max_abs <= 20 ~ 5,
+    TRUE          ~ 10
+  )
+
+  breaks <- seq(
+    from = -ceiling(max_abs / step) * step,
+    to   =  ceiling(max_abs / step) * step,
+    by   = step
+  )
+
+  breaks[breaks >= rng[1] & breaks <= rng[2]]
+}
+
+contrast_order <- c(
+  "diesel_only",
+  "diesel_added",
+  "salinity_only",
+  "salinity_added",
+  "additive",
+  "combined",
+  "interactive"
+)
+
+term_order <- ORA_dotplot_df %>%
+  dplyr::mutate(
+    contrast = factor(contrast, levels = contrast_order)
+  ) %>%
+  dplyr::arrange(contrast, term) %>%
+  dplyr::pull(term) %>%
+  unique()
+
+ORA_dotplot_df <- ORA_dotplot_df %>%
+  dplyr::mutate(
+    term = factor(term, levels = rev(term_order)),
+    LFC_direction = dplyr::case_when(
+      lfc > 0  ~ "Positive LFC",
+      lfc < 0  ~ "Negative LFC",
+      lfc == 0 ~ "LFC = 0",
+      TRUE     ~ "LFC unavailable"
+    ),
+    LFC_direction = factor(
+      LFC_direction,
+      levels = c("Positive LFC", "Negative LFC", "LFC = 0", "LFC unavailable")
+    )
+  )
+
+p_ORA_dotplot <- ggplot(
+  ORA_dotplot_df,
+  aes(
+    x = lfc,
+    y = term,
+    colour = LFC_direction
+  )
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.90,
+    colour = "grey35"
+  ) +
+  geom_point(
+    position = position_jitter(
+      width = 0,
+      height = 0.18,
+      seed = 123
+    ),
+    size = 2.5,
+    alpha = 0.65
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Positive LFC" = "#E45756",
+      "Negative LFC" = "#4C78A8",
+      "LFC = 0" = "grey60",
+      "LFC unavailable" = "grey85"
+    ),
+    name = "LFC direction"
+  ) +
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width = 80)
+  ) +
+  scale_x_continuous(
+    breaks = lfc_breaks,
+    expand = expansion(mult = c(0.1, 0.1))
+  ) +
+  labs(
+    x = "Shrunken log2 fold-change (LFC, ashr)",
+    y = NULL
+  ) +
+  facet_grid(
+    ~contrast,
+    scales = "free",
+    labeller = labeller(contrast = contrast_labels)
+  ) +
+  theme_bw(base_size = 8) +
+  theme(
+    axis.text.y = element_text(size = 10, colour = "black"),
+    axis.text.x = element_text(size = 8, colour = "black"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.25),
+    panel.grid.major.x = element_line(colour = "grey90", linewidth = 0.25),
+    plot.margin = margin(5.5, 10, 5.5, 30)
+  )
+
+p_ORA_dotplot
+
+ggsave(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/ORA_dotplot_semantic_representatives.png",
+  p_ORA_dotplot,
+  width = 280,
+  height = 170,
+  units = "mm",
+  dpi = 600
+)
+
+write.csv(ORA_dotplot_df, "ORA_dotplot_df")
+# 3 panel dotplot? ----
+# ============================================================
+# ORA semantic dotplot: 3 panels
+# Diesel treatments | Salinity treatments | Multi-stress contexts
+# ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(scales)
+
+ORA_dotplot_df <- ORA_plotting_data %>%
+  filter(!is.na(lfc)) %>%
+  mutate(
+    context_group = case_when(
+      contrast %in% c("diesel_only", "diesel_added") ~ "Diesel treatments",
+      contrast %in% c("salinity_only", "salinity_added") ~ "Salinity treatments",
+      contrast %in% c("combined", "additive", "interactive") ~ "Multi-stress contexts",
+      TRUE ~ "Other"
+    ),
+    context_group = factor(
+      context_group,
+      levels = c(
+        "Diesel treatments",
+        "Salinity treatments",
+        "Multi-stress contexts"
+      )
+    ),
+    contrast = factor(
+      contrast,
+      levels = c(
+        "diesel_only",
+        "diesel_added",
+        "salinity_only",
+        "salinity_added",
+        "combined",
+        "additive",
+        "interactive"
+      )
+    )
+  ) %>%
+  filter(!is.na(context_group), !is.na(contrast))
+
+ora_term_levels <- ORA_dotplot_df %>%
+  group_by(term) %>%
+  summarise(
+    n_contexts = n_distinct(contrast),
+    mean_abs_lfc = mean(abs(lfc), na.rm = TRUE),
+    median_lfc = median(lfc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_contexts), desc(mean_abs_lfc), median_lfc, term) %>%
+  pull(term)
+
+ORA_dotplot_df <- ORA_dotplot_df %>%
+  mutate(
+    term = factor(term, levels = rev(ora_term_levels))
+  )
+
+p_ORA_dotplot_3panel <- ggplot(
+  ORA_dotplot_df,
+  aes(
+    x = lfc,
+    y = term,
+    colour = contrast
+  )
+) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    colour = "grey55"
+  ) +
+  geom_point(
+    position = position_jitter(
+      width = 0,
+      height = 0.18,
+      seed = 123
+    ),
+    size = 3,
+    alpha = 0.25
+  ) +
+ # facet_wrap(
+ #   ~ context_group,
+ #   nrow = 1,
+ #   scales = "free_y"
+ # ) +
+    facet_grid(
+    ~ context_group
+  ) +
+  scale_colour_manual(
+    values = c(
+      diesel_only    = "#1B9E77",
+      diesel_added   = "#377EB8",
+      salinity_only  = "#E41A1C",
+      salinity_added = "#FF7F00",
+      combined       = "#4DAF4A",
+      additive       = "#4DAF4A",
+      interactive    = "#984EA3"
+    ),
+    labels = c(
+      diesel_only    = "Diesel",
+      diesel_added   = "+ Diesel",
+      salinity_only  = "Salinity",
+      salinity_added = "+ Salinity",
+      combined       = "Additive",
+      additive       = "Additive",
+      interactive    = "Interactive"
+    ),
+    name = "Context"
+  ) +
+  scale_y_discrete(
+    labels = function(x) stringr::str_wrap(x, width = 45)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-10, 10, by = 5),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  coord_cartesian(xlim = c(-10, 10)) +
+  labs(
+    x = "Shrunken log2 fold-change (LFC, ashr)",
+    y = NULL
+  ) +
+  theme_bw(base_size = 8) +
+  theme(
+    strip.background = element_rect(fill = "grey95", colour = "black", linewidth = 0.4),
+    strip.text.x = element_text(face = "bold", size = 8),
+    axis.text.y = element_text(size = 9, colour = "black"),
+    axis.text.x = element_text(size = 9, colour = "black"),
+    axis.title.x = element_text(size = 10, face = "bold"),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(colour = "grey88", linewidth = 0.25),
+    panel.grid.major.x = element_line(colour = "grey90", linewidth = 0.25),
+    panel.spacing.x = unit(1.2, "lines"),
+    plot.margin = margin(5.5, 10, 5.5, 20)
+  )
+
+p_ORA_dotplot_3panel
+
+ggsave(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/figures/main figures/ORA_dotplot_semantic_representatives.png",
+  p_ORA_dotplot_3panel,
+  width = 246,
+  height = 200,
+  units = "mm",
+  dpi = 300
+)
+
+```
+
+# Venn diagram of GO terms
+
+```{r venn_of_enrichments}
+# ============================================================
+# Combine ORA and GSEA results + make Venn diagrams
+# ============================================================
+
+library(readr)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(ggplot2)
+
+# Install if needed:
+# install.packages("ggVennDiagram")
+library(ggVennDiagram)
+
+# ------------------------------------------------------------
+# 1. File paths
+# ------------------------------------------------------------
+
+gsea_file <- "GSEA_results.csv"
+ora_file  <- "ORA_dotplot_df.csv"
+
+out_dir <- "combined_ORA_GSEA_outputs"
+
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+}
+
+# ------------------------------------------------------------
+# 2. Contrast naming
+# ------------------------------------------------------------
+# additive and combined are treated as the same contrast.
+
+contrast_order <- c(
+  "diesel",
+  "+ diesel",
+  "salinity",
+  "+ salinity",
+  "combined",
+  "interactive"
+)
+
+clean_contrast <- function(x) {
+  dplyr::case_when(
+    x %in% c("diesel_only", "diesel") ~ "diesel",
+    x %in% c("diesel_added", "+ diesel") ~ "+ diesel",
+    x %in% c("salinity_only", "salinity") ~ "salinity",
+    x %in% c("salinity_added", "+ salinity") ~ "+ salinity",
+    x %in% c("combined", "additive") ~ "combined",
+    x %in% c("interactive", "interaction") ~ "interactive",
+    TRUE ~ as.character(x)
+  )
+}
+
+# ------------------------------------------------------------
+# 3. Read files
+# ------------------------------------------------------------
+
+GSEA_results <- read_csv(gsea_file, show_col_types = FALSE) %>%
+  select(-any_of("...1"), -any_of("Unnamed: 0"))
+
+ORA_results <- read_csv(ora_file, show_col_types = FALSE) %>%
+  select(-any_of("...1"), -any_of("Unnamed: 0"))
+
+# ------------------------------------------------------------
+# 4. Standardise GSEA results
+# ------------------------------------------------------------
+
+GSEA_combined <- GSEA_results %>%
+  mutate(
+    method = "GSEA",
+    contrast_original = contrast,
+    contrast = clean_contrast(contrast),
+    
+    original_GO_ID = ID,
+    original_GO_term = Description,
+    
+    # GSEA file does not currently contain a separate semantic
+    # representative term column, so Description is used here.
+    semantic_GO_term = Description,
+    
+    p_adjust = p.adjust,
+    statistic = NES,
+    direction = case_when(
+      NES > 0 ~ "positive",
+      NES < 0 ~ "negative",
+      NES == 0 ~ "zero",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(
+    method,
+    contrast,
+    contrast_original,
+    original_GO_ID,
+    original_GO_term,
+    semantic_GO_term,
+    p_adjust,
+    statistic,
+    direction,
+    everything()
+  )
+
+# ------------------------------------------------------------
+# 5. Standardise ORA results
+# ------------------------------------------------------------
+
+ORA_combined <- ORA_results %>%
+  mutate(
+    method = "ORA",
+    contrast_original = contrast,
+    contrast = clean_contrast(contrast),
+    
+    original_GO_ID = original_GO_ID,
+    original_GO_term = original_GO_term,
+    
+    # In your ORA file, `term` is the representative semantic term.
+    semantic_GO_term = term,
+    
+    p_adjust = p.adjust,
+    statistic = lfc,
+    direction = case_when(
+      lfc > 0 ~ "positive",
+      lfc < 0 ~ "negative",
+      lfc == 0 ~ "zero",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(
+    method,
+    contrast,
+    contrast_original,
+    original_GO_ID,
+    original_GO_term,
+    semantic_GO_term,
+    p_adjust,
+    statistic,
+    direction,
+    everything()
+  )
+
+# ------------------------------------------------------------
+# 6. Combine into one dataframe
+# ------------------------------------------------------------
+
+combined_GO_results <- bind_rows(
+  GSEA_combined,
+  ORA_combined
+) %>%
+  mutate(
+    contrast = factor(contrast, levels = contrast_order),
+    method = factor(method, levels = c("ORA", "GSEA"))
+  )
+
+write_csv(
+  combined_GO_results,
+  file.path(out_dir, "combined_ORA_GSEA_results.csv")
+)
+
+# Optional QC
+combined_GO_results %>%
+  count(method, contrast, name = "n_rows")
+
+combined_GO_results %>%
+  distinct(method, contrast, original_GO_ID, original_GO_term, semantic_GO_term) %>%
+  count(method, contrast, name = "n_unique_GO_terms")
+
+# ------------------------------------------------------------
+# 7. Helper function for contrast Venn sets
+# ------------------------------------------------------------
+library(tibble)
+make_venn_sets <- function(df, value_col) {
+  df %>%
+    filter(!is.na(contrast)) %>%
+    filter(contrast %in% contrast_order) %>%
+    mutate(contrast = as.character(contrast)) %>%
+    distinct(contrast, {{ value_col }}) %>%
+    filter(!is.na({{ value_col }})) %>%
+    group_by(contrast) %>%
+    summarise(
+      values = list(unique({{ value_col }})),
+      .groups = "drop"
+    ) %>%
+    deframe() %>%
+    .[contrast_order] %>%
+    purrr::discard(is.null)
+}
+
+# ------------------------------------------------------------
+# 8. Venn diagram: original GO terms
+# ------------------------------------------------------------
+
+venn_original_GO <- make_venn_sets(
+  combined_GO_results,
+  original_GO_ID
+)
+
+p_venn_original_GO <- ggVennDiagram(
+  venn_original_GO,
+  label_alpha = 0
+) +
+  scale_fill_gradient(low = "white", high = "grey60") +
+  labs(
+    title = "Overlap of original GO terms across contrasts",
+    fill = "Count"
+  ) +
+  theme_void(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+p_venn_original_GO
+
+ggsave(
+  file.path(out_dir, "venn_original_GO_terms.png"),
+  p_venn_original_GO,
+  width = 220,
+  height = 180,
+  units = "mm",
+  dpi = 600
+)
+
+# ------------------------------------------------------------
+# 9. Venn diagram: semantic representative GO terms
+# ------------------------------------------------------------
+
+venn_semantic_GO <- make_venn_sets(
+  combined_GO_results,
+  semantic_GO_term
+)
+
+p_venn_semantic_GO <- ggVennDiagram(
+  venn_semantic_GO,
+  label_alpha = 0
+) +
+  scale_fill_gradient(low = "white", high = "grey60") +
+  labs(
+    title = "Overlap of semantic GO terms across contrasts",
+    fill = "Count"
+  ) +
+  theme_void(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+p_venn_semantic_GO
+
+ggsave(
+  file.path(out_dir, "venn_semantic_GO_terms.png"),
+  p_venn_semantic_GO,
+  width = 220,
+  height = 180,
+  units = "mm",
+  dpi = 600
+)
+```
+
+# Upset plot of enrichment data
+
+```{r upset}
+# ============================================================
+# UpSet plots instead of Venn diagrams
+# ============================================================
+
+# Install if needed:
+# install.packages("ComplexUpset")
+
+library(ComplexUpset)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+# ------------------------------------------------------------
+# 1. Contrast labels for plotting
+# ------------------------------------------------------------
+
+contrast_order <- c(
+  "diesel",
+  "+ diesel",
+  "salinity",
+  "+ salinity",
+  "combined",
+  "interactive"
+)
+
+contrast_plot_labels <- c(
+  diesel        = "Diesel",
+  `+ diesel`   = "+ Diesel",
+  salinity      = "Salinity",
+  `+ salinity` = "+ Salinity",
+  combined      = "Combined",
+  interactive   = "Interactive"
+)
+
+# ------------------------------------------------------------
+# 2. Helper function to make UpSet input dataframe
+# ------------------------------------------------------------
+
+make_upset_input <- function(df, value_col, value_name = "GO_term") {
+  
+  upset_df <- df %>%
+    mutate(
+      contrast = as.character(contrast),
+      contrast = dplyr::case_when(
+        contrast == "additive" ~ "combined",
+        TRUE ~ contrast
+      )
+    ) %>%
+    filter(contrast %in% contrast_order) %>%
+    mutate(
+      contrast_label = contrast_plot_labels[contrast],
+      GO_value = as.character({{ value_col }})
+    ) %>%
+    filter(
+      !is.na(GO_value),
+      GO_value != ""
+    ) %>%
+    distinct(GO_value, contrast_label) %>%
+    mutate(present = TRUE) %>%
+    tidyr::pivot_wider(
+      names_from = contrast_label,
+      values_from = present,
+      values_fill = FALSE
+    )
+  
+  # Ensure all expected contrast columns exist, even if a contrast has no terms
+  expected_cols <- unname(contrast_plot_labels[contrast_order])
+  missing_cols <- setdiff(expected_cols, names(upset_df))
+  
+  if (length(missing_cols) > 0) {
+    for (col in missing_cols) {
+      upset_df[[col]] <- FALSE
+    }
+  }
+  
+  upset_df %>%
+    select(
+      GO_value,
+      all_of(expected_cols)
+    ) %>%
+    rename(!!value_name := GO_value)
+}
+
+# ------------------------------------------------------------
+# 3. Original GO term UpSet plot
+# ------------------------------------------------------------
+
+upset_original_GO <- make_upset_input(
+  combined_GO_results,
+  original_GO_ID,
+  value_name = "original_GO_ID"
+)
+
+contrast_cols <- unname(contrast_plot_labels[contrast_order])
+
+p_upset_original_GO <- ComplexUpset::upset(
+  upset_original_GO,
+  intersect = contrast_cols,
+  name = "Contrast",
+  min_size = 1,
+  base_annotations = list(
+    "Intersection size" = ComplexUpset::intersection_size(
+      counts = TRUE
+    )
+  ),
+  set_sizes = ComplexUpset::upset_set_size()
+) +
+  labs(
+    title = "Overlap of original GO terms across contrasts"
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5
+    )
+  )
+
+p_upset_original_GO
+
+ggsave(
+  file.path(out_dir, "upset_original_GO_terms.png"),
+  p_upset_original_GO,
+  width = 220,
+  height = 160,
+  units = "mm",
+  dpi = 600
+)
+
+# ------------------------------------------------------------
+# 4. Semantic representative GO term UpSet plot
+# ------------------------------------------------------------
+
+upset_semantic_GO <- make_upset_input(
+  combined_GO_results,
+  semantic_GO_term,
+  value_name = "semantic_GO_term"
+)
+
+p_upset_semantic_GO <- ComplexUpset::upset(
+  upset_semantic_GO,
+  intersect = contrast_cols,
+  name = "Contrast",
+  min_size = 1,
+  base_annotations = list(
+    "Intersection size" = ComplexUpset::intersection_size(
+      counts = TRUE
+    )
+  ),
+  set_sizes = ComplexUpset::upset_set_size()
+) +
+  labs(
+    title = "Overlap of semantic representative GO terms across contrasts"
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5
+    )
+  )
+
+p_upset_semantic_GO
+
+
+# Making plots look nicer ----
+# ============================================================
+# ORA + GSEA UpSet plots for original and semantic GO terms
+# ============================================================
+
+# Load packages ----
+check_packages <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      message(pkg, " is not installed")
+      
+      if (pkg %in% c("ComplexHeatmap")) {
+        if (!requireNamespace("BiocManager", quietly = TRUE)) {
+          install.packages("BiocManager")
+        }
+        BiocManager::install(pkg)
+      } else {
+        install.packages(pkg)
+      }
+      
+      suppressMessages(library(pkg, character.only = TRUE))
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+    }
+  }
+}
+
+pkg_list <- c(
+  "readr",
+  "dplyr",
+  "tidyr",
+  "stringr",
+  "purrr",
+  "ComplexHeatmap",
+  "grid",
+  "tibble"
+)
+
+check_packages(pkg_list)
+
+# ------------------------------------------------------------
+# File paths
+# ------------------------------------------------------------
+
+gsea_file <- "GSEA_results.csv"
+ora_file  <- "ORA_dotplot_df.csv"
+
+out_dir <- "combined_ORA_GSEA_outputs"
+
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+}
+
+# ------------------------------------------------------------
+# Read files
+# ------------------------------------------------------------
+
+GSEA_results <- readr::read_csv(gsea_file, show_col_types = FALSE) %>%
+  dplyr::select(-dplyr::any_of(c("...1", "Unnamed: 0")))
+
+ORA_results <- readr::read_csv(ora_file, show_col_types = FALSE) %>%
+  dplyr::select(-dplyr::any_of(c("...1", "Unnamed: 0")))
+
+# ------------------------------------------------------------
+# Contrast name harmonisation
+# ------------------------------------------------------------
+# additive and combined are treated as the same contrast.
+
+clean_contrast <- function(x) {
+  dplyr::case_when(
+    x %in% c("diesel_only", "diesel") ~ "Diesel",
+    x %in% c("salinity_only", "salinity") ~ "Salinity",
+    x %in% c("diesel_added", "+ diesel", "+ Diesel") ~ "+ Diesel",
+    x %in% c("salinity_added", "+ salinity", "+ Salinity") ~ "+ Salinity",
+    x %in% c("combined", "additive") ~ "D + S + D*S",
+    x %in% c("interactive", "interaction", "interactive_only") ~ "D*S",
+    TRUE ~ as.character(x)
+  )
+}
+
+set_order <- c(
+  "Diesel",
+  "Salinity",
+  "+ Diesel",
+  "+ Salinity",
+  "D + S + D*S",
+  "D*S"
+)
+
+# ------------------------------------------------------------
+# Standardise GSEA
+# ------------------------------------------------------------
+# GSEA file has:
+# original GO ID   = ID
+# original GO term = Description
+#
+# It does not currently have a separate semantic representative column,
+# so Description is used as semantic_GO_term for GSEA.
+
+GSEA_combined <- GSEA_results %>%
+  dplyr::mutate(
+    method = "GSEA",
+    contrast_original = contrast,
+    contrast = clean_contrast(contrast),
+    original_GO_ID = ID,
+    original_GO_term = Description,
+    semantic_GO_term = Description,
+    p_adjust = p.adjust,
+    statistic = NES,
+    direction = dplyr::case_when(
+      NES > 0  ~ "positive",
+      NES < 0  ~ "negative",
+      NES == 0 ~ "zero",
+      TRUE     ~ NA_character_
+    )
+  ) %>%
+  dplyr::select(
+    method,
+    contrast,
+    contrast_original,
+    original_GO_ID,
+    original_GO_term,
+    semantic_GO_term,
+    p_adjust,
+    statistic,
+    direction,
+    dplyr::everything()
+  )
+
+# ------------------------------------------------------------
+# Standardise ORA
+# ------------------------------------------------------------
+# ORA file has:
+# original GO ID   = original_GO_ID
+# original GO term = original_GO_term
+# semantic term    = term
+
+ORA_combined <- ORA_results %>%
+  dplyr::mutate(
+    method = "ORA",
+    contrast_original = contrast,
+    contrast = clean_contrast(contrast),
+    semantic_GO_term = term,
+    p_adjust = p.adjust,
+    statistic = lfc,
+    direction = dplyr::case_when(
+      lfc > 0  ~ "positive",
+      lfc < 0  ~ "negative",
+      lfc == 0 ~ "zero",
+      TRUE     ~ NA_character_
+    )
+  ) %>%
+  dplyr::select(
+    method,
+    contrast,
+    contrast_original,
+    original_GO_ID,
+    original_GO_term,
+    semantic_GO_term,
+    p_adjust,
+    statistic,
+    direction,
+    dplyr::everything()
+  )
+
+# ------------------------------------------------------------
+# Combine
+# ------------------------------------------------------------
+
+combined_GO_results <- dplyr::bind_rows(
+  ORA_combined,
+  GSEA_combined
+) %>%
+  dplyr::mutate(
+    contrast = factor(contrast, levels = set_order),
+    method = factor(method, levels = c("ORA", "GSEA"))
+  )
+
+readr::write_csv(
+  combined_GO_results,
+  file.path(out_dir, "combined_ORA_GSEA_results.csv")
+)
+
+# QC
+combined_GO_results %>%
+  dplyr::count(method, contrast, name = "n_rows")
+
+# ============================================================
+# Functions for UpSet plotting
+# ============================================================
+
+make_upset_sets <- function(df, value_col, term_id_col = "GO_term") {
+  
+  upset_sets <- df %>%
+    dplyr::filter(!is.na(contrast)) %>%
+    dplyr::filter(contrast %in% set_order) %>%
+    dplyr::mutate(
+      contrast = as.character(contrast),
+      GO_value = as.character({{ value_col }})
+    ) %>%
+    dplyr::filter(
+      !is.na(GO_value),
+      GO_value != ""
+    ) %>%
+    dplyr::distinct(GO_value, contrast) %>%
+    dplyr::mutate(present = TRUE) %>%
+    tidyr::pivot_wider(
+      names_from = contrast,
+      values_from = present,
+      values_fill = FALSE
+    )
+  
+  # Ensure all expected contrast columns exist
+  missing_sets <- setdiff(set_order, names(upset_sets))
+  
+  if (length(missing_sets) > 0) {
+    for (set_name in missing_sets) {
+      upset_sets[[set_name]] <- FALSE
+    }
+  }
+  
+  upset_sets <- upset_sets %>%
+    dplyr::select(
+      GO_value,
+      dplyr::all_of(set_order)
+    )
+  
+  # Convert to logical matrix for ComplexHeatmap
+  mat <- upset_sets %>%
+    dplyr::select(dplyr::all_of(set_order)) %>%
+    as.matrix()
+  
+  storage.mode(mat) <- "logical"
+  
+  rownames(mat) <- upset_sets$GO_value
+  
+  mat <- mat[rowSums(mat, na.rm = TRUE) > 0, , drop = FALSE]
+  
+  return(mat)
+}
+
+make_intersection_table <- function(comb_mat) {
+  
+  comb_codes <- ComplexHeatmap::comb_name(comb_mat)
+  set_names  <- ComplexHeatmap::set_name(comb_mat)
+  
+  intersection_table <- tibble::tibble(
+    comb_code = comb_codes,
+    n_contrasts = ComplexHeatmap::comb_degree(comb_mat),
+    n_terms = ComplexHeatmap::comb_size(comb_mat),
+    intersection = vapply(
+      comb_codes,
+      function(code) {
+        hits <- set_names[as.logical(as.integer(strsplit(code, "")[[1]]))]
+        paste(hits, collapse = " & ")
+      },
+      character(1)
+    )
+  ) %>%
+    dplyr::filter(n_terms > 0) %>%
+    dplyr::select(intersection, n_contrasts, n_terms) %>%
+    dplyr::arrange(
+      dplyr::desc(n_terms),
+      dplyr::desc(n_contrasts)
+    )
+  
+  intersection_table
+}
+
+make_go_upset_plot <- function(
+    upset_mat,
+    output_file,
+    intersection_table_file,
+    width_px = 3250,
+    height_px = 2000,
+    res = 300
+) {
+  
+  # Make combination matrix
+  comb_mat <- ComplexHeatmap::make_comb_mat(upset_mat)
+  
+  # Remove empty combinations
+  comb_mat <- comb_mat[
+    ComplexHeatmap::comb_degree(comb_mat) > 0 &
+      ComplexHeatmap::comb_size(comb_mat) > 0
+  ]
+  
+  # Save intersection table
+  intersection_table <- make_intersection_table(comb_mat)
+  
+  readr::write_csv(
+    intersection_table,
+    intersection_table_file
+  )
+  
+  # Colours matched to your previous contrast aesthetics
+  bg_cols <- c(
+    "Diesel"        = "#98c2d9",
+    "Salinity"      = "#f7e9a1",
+    "+ Diesel"      = "#98c2d9",
+    "+ Salinity"    = "#f7e9a1",
+    "D + S + D*S"   = "#cc9593",
+    "D*S"           = "#cc4551"
+  )
+  
+  png(
+    output_file,
+    width = width_px,
+    height = height_px,
+    res = res
+  )
+  
+  ComplexHeatmap::UpSet(
+    comb_mat,
+    
+    set_order = set_order,
+    
+    comb_order = order(
+      ComplexHeatmap::comb_size(comb_mat),
+      decreasing = TRUE
+    ),
+    
+    top_annotation = ComplexHeatmap::upset_top_annotation(
+      comb_mat,
+      add_numbers    = TRUE,
+      numbers_gp     = grid::gpar(cex = 0.6),
+      numbers_offset = grid::unit(1, "mm"),
+      numbers_rot    = 0,
+      gp             = grid::gpar(fill = "grey50", col = "grey30"),
+      bar_width      = grid::unit(5, "mm"),
+      ylim           = c(0, max(ComplexHeatmap::comb_size(comb_mat))),
+      axis_param     = list(
+        at     = pretty(c(0, max(ComplexHeatmap::comb_size(comb_mat)))),
+        labels = pretty(c(0, max(ComplexHeatmap::comb_size(comb_mat)))),
+        gp     = grid::gpar(cex = 0.75)
+      ),
+      height = grid::unit(40, "mm")
+    ),
+    
+    right_annotation = ComplexHeatmap::upset_right_annotation(
+      comb_mat,
+      add_numbers = TRUE,
+      numbers_gp  = grid::gpar(cex = 0.7),
+      gp          = grid::gpar(fill = "grey75", col = "grey30"),
+      width       = grid::unit(4, "cm"),
+      bar_width   = grid::unit(6, "mm")
+    ),
+    
+    comb_col = "black",
+    bg_col = unname(bg_cols[rev(set_order)]),
+    bg_pt_col = "white",
+    pt_size = grid::unit(3, "mm"),
+    lwd = 1.2,
+    row_names_gp = grid::gpar(fontsize = 12)
+  )
+  
+  dev.off()
+  
+  return(
+    list(
+      comb_mat = comb_mat,
+      intersection_table = intersection_table
+    )
+  )
+}
+
+# Required packages ----
+library(dplyr)
+library(tidyr)
+library(ComplexHeatmap)
+library(grid)
+
+# Contrast order ----
+set_order <- c(
+  "Diesel",
+  "Salinity",
+  "+ Diesel",
+  "+ Salinity",
+  "D + S + D*S",
+  "D*S"
+)
+
+# Make logical matrix for ComplexHeatmap UpSet ----
+make_upset_sets <- function(df, value_col) {
+  
+  upset_sets <- df %>%
+    dplyr::filter(!is.na(contrast)) %>%
+    dplyr::filter(contrast %in% set_order) %>%
+    dplyr::mutate(
+      contrast = as.character(contrast),
+      GO_value = as.character({{ value_col }})
+    ) %>%
+    dplyr::filter(
+      !is.na(GO_value),
+      GO_value != ""
+    ) %>%
+    dplyr::distinct(GO_value, contrast) %>%
+    dplyr::mutate(present = TRUE) %>%
+    tidyr::pivot_wider(
+      names_from = contrast,
+      values_from = present,
+      values_fill = FALSE
+    )
+  
+  missing_sets <- setdiff(set_order, names(upset_sets))
+  
+  if (length(missing_sets) > 0) {
+    for (set_name in missing_sets) {
+      upset_sets[[set_name]] <- FALSE
+    }
+  }
+  
+  upset_sets <- upset_sets %>%
+    dplyr::select(
+      GO_value,
+      dplyr::all_of(set_order)
+    )
+  
+  upset_mat <- upset_sets %>%
+    dplyr::select(dplyr::all_of(set_order)) %>%
+    as.matrix()
+  
+  storage.mode(upset_mat) <- "logical"
+  rownames(upset_mat) <- upset_sets$GO_value
+  
+  upset_mat <- upset_mat[rowSums(upset_mat, na.rm = TRUE) > 0, , drop = FALSE]
+  
+  return(upset_mat)
+}
+
+# Make ComplexHeatmap UpSet object ----
+make_go_upset_object <- function(upset_mat) {
+  
+  comb_mat <- ComplexHeatmap::make_comb_mat(upset_mat)
+  
+  comb_mat <- comb_mat[
+    ComplexHeatmap::comb_degree(comb_mat) > 0 &
+      ComplexHeatmap::comb_size(comb_mat) > 0
+  ]
+  
+  bg_cols <- c(
+    "Diesel"      = "#98c2d9",
+    "Salinity"    = "#f7e9a1",
+    "+ Diesel"    = "#98c2d9",
+    "+ Salinity"  = "#f7e9a1",
+    "D + S + D*S" = "#cc9593",
+    "D*S"         = "#cc4551"
+  )
+  
+  ComplexHeatmap::UpSet(
+    comb_mat,
+    
+    set_order = set_order,
+    
+    comb_order = order(
+      ComplexHeatmap::comb_size(comb_mat),
+      decreasing = TRUE
+    ),
+    
+    top_annotation = ComplexHeatmap::upset_top_annotation(
+      comb_mat,
+      add_numbers    = TRUE,
+      numbers_gp     = grid::gpar(cex = 0.6),
+      numbers_offset = grid::unit(1, "mm"),
+      numbers_rot    = 0,
+      gp             = grid::gpar(fill = "grey50", col = "grey30"),
+      bar_width      = grid::unit(5, "mm"),
+      ylim           = c(0, max(ComplexHeatmap::comb_size(comb_mat))),
+      axis_param     = list(
+        at     = pretty(c(0, max(ComplexHeatmap::comb_size(comb_mat)))),
+        labels = pretty(c(0, max(ComplexHeatmap::comb_size(comb_mat)))),
+        gp     = grid::gpar(cex = 0.75)
+      ),
+      height = grid::unit(40, "mm")
+    ),
+    
+    right_annotation = ComplexHeatmap::upset_right_annotation(
+      comb_mat,
+      add_numbers = TRUE,
+      numbers_gp  = grid::gpar(cex = 0.7),
+      gp          = grid::gpar(fill = "grey75", col = "grey30"),
+      width       = grid::unit(4, "cm"),
+      bar_width   = grid::unit(6, "mm")
+    ),
+    
+    comb_col = "black",
+    bg_col = unname(bg_cols[rev(set_order)]),
+    bg_pt_col = "white",
+    pt_size = grid::unit(3, "mm"),
+    lwd = 1.2,
+    row_names_gp = grid::gpar(fontsize = 12)
+  )
+}
+
+# ============================================================
+# Original GO term UpSet plot
+# ============================================================
+
+upset_original_GO_mat <- make_upset_sets(
+  combined_GO_results,
+  original_GO_ID
+)
+
+original_GO_upset <- make_go_upset_plot(
+  upset_mat = upset_original_GO_mat,
+  output_file = file.path(out_dir, "upset_original_GO_terms.png"),
+  intersection_table_file = file.path(out_dir, "upset_original_GO_terms_intersections.csv")
+)
+
+original_GO_upset <- make_go_upset_object(
+  upset_mat = upset_original_GO_mat
+)
+
+grid::grid.newpage()
+ComplexHeatmap::draw(original_GO_upset)
+
+# ============================================================
+# Semantic representative GO term UpSet plot
+# ============================================================
+
+upset_semantic_GO_mat <- make_upset_sets(
+  combined_GO_results,
+  semantic_GO_term
+)
+
+semantic_GO_upset <- make_go_upset_object(
+  upset_mat = upset_semantic_GO_mat
+)
+
+grid::grid.newpage()
+ComplexHeatmap::draw(semantic_GO_upset)
+
+# plot together
+# ------------------------------------------------------------
+# Plot both in one plotting space: A top, B bottom
+# ------------------------------------------------------------
+
+grid::grid.newpage()
+
+pushViewport(
+  viewport(
+    layout = grid.layout(
+      nrow = 2,
+      ncol = 1,
+      heights = unit(c(1, 1), "null")
+    )
+  )
+)
+
+# Panel A: Original GO terms ----
+pushViewport(
+  viewport(
+    layout.pos.row = 1,
+    layout.pos.col = 1
+  )
+)
+
+ComplexHeatmap::draw(
+  original_GO_upset,
+  newpage = FALSE
+)
+
+grid::grid.text(
+  "A",
+  x = unit(2, "mm"),
+  y = unit(1, "npc") - unit(2, "mm"),
+  just = c("left", "top"),
+  gp = gpar(
+    fontsize = 18,
+    fontface = "bold"
+  )
+)
+
+popViewport()
+
+# Panel B: Semantic GO terms ----
+pushViewport(
+  viewport(
+    layout.pos.row = 2,
+    layout.pos.col = 1
+  )
+)
+
+ComplexHeatmap::draw(
+  semantic_GO_upset,
+  newpage = FALSE
+)
+
+grid::grid.text(
+  "B",
+  x = unit(2, "mm"),
+  y = unit(1, "npc") - unit(2, "mm"),
+  just = c("left", "top"),
+  gp = gpar(
+    fontsize = 18,
+    fontface = "bold"
+  )
+)
+
+popViewport()
+
+popViewport()
+
+# save plot
+{
+png(
+  file.path("upset_original_and_semantic_GO_terms_combined.png"),
+  width = 3250,
+  height = 4000,
+  res = 450
+)
+
+grid::grid.newpage()
+
+pushViewport(
+  viewport(
+    layout = grid.layout(
+      nrow = 2,
+      ncol = 1,
+      heights = unit(c(1, 1), "null")
+    )
+  )
+)
+
+# A: Original GO terms
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+
+ComplexHeatmap::draw(
+  original_GO_upset,
+  newpage = FALSE
+)
+
+grid::grid.text(
+  "A",
+  x = unit(2, "mm"),
+  y = unit(1, "npc") - unit(2, "mm"),
+  just = c("left", "top"),
+  gp = gpar(fontsize = 18, fontface = "bold")
+)
+
+popViewport()
+
+# B: Semantic GO terms
+pushViewport(viewport(layout.pos.row = 2, layout.pos.col = 1))
+
+ComplexHeatmap::draw(
+  semantic_GO_upset,
+  newpage = FALSE
+)
+
+grid::grid.text(
+  "B",
+  x = unit(2, "mm"),
+  y = unit(1, "npc") - unit(2, "mm"),
+  just = c("left", "top"),
+  gp = gpar(fontsize = 18, fontface = "bold")
+)
+
+popViewport()
+
+popViewport()
+
+dev.off()
+}
+```
+
+# supplementary table
+```{r supplementary_table}
+# ============================================================
+# Combined supplementary GO semantic clustering table
+# ORA + GSEA
+# ============================================================
+
+library(dplyr)
+library(stringr)
+library(tibble)
+
+# -----------------------------
+# 1. Helper function
+# -----------------------------
+
+# ============================================================
+# Safe supplementary table builder
+# ORA + GSEA semantic enrichment results
+# ============================================================
+
+library(dplyr)
+library(tibble)
+
+safe_col <- function(df, col, default = NA) {
+  if (col %in% names(df)) {
+    df[[col]]
+  } else {
+    rep(default, nrow(df))
+  }
+}
+
+make_supplementary_go_table <- function(df, method_name) {
+  
+  df <- as_tibble(df)
+  
+  # Ontology fallback
+  ontology_col <- if ("ontology" %in% names(df)) {
+    df$ontology
+  } else if ("GO" %in% names(df)) {
+    df$GO
+  } else {
+    rep(NA_character_, nrow(df))
+  }
+  
+  # Representative semantic GO fallback
+  representative_term <- if ("Representative_GO" %in% names(df)) {
+    df$Representative_GO
+  } else if ("representative_Description_QuickGO" %in% names(df)) {
+    df$representative_Description_QuickGO
+  } else {
+    df$Description
+  }
+  
+  representative_id <- if ("representative_ID" %in% names(df)) {
+    df$representative_ID
+  } else {
+    df$ID
+  }
+  
+  # Gene-list column differs between ORA and GSEA
+  genes <- if ("geneID" %in% names(df)) {
+    df$geneID
+  } else if ("core_enrichment" %in% names(df)) {
+    df$core_enrichment
+  } else {
+    rep(NA_character_, nrow(df))
+  }
+  
+  df %>%
+    transmute(
+      Method = method_name,
+      Contrast = safe_col(df, "contrast", NA_character_),
+      Ontology = ontology_col,
+      
+      `Original GO ID` = ID,
+      `Original GO term` = Description,
+      
+      `Semantic cluster number` = safe_col(df, "semantic_cluster", NA_integer_),
+      `Semantic cluster ID` = safe_col(df, "semantic_cluster_id", NA_character_),
+      `Representative semantic GO ID` = representative_id,
+      `Representative semantic GO term` = representative_term,
+      
+      `p-value` = safe_col(df, "pvalue", NA_real_),
+      `Adjusted p-value` = safe_col(df, "p.adjust", NA_real_),
+      qvalue = safe_col(df, "qvalue", NA_real_),
+      
+      # ORA-specific columns
+      GeneRatio = safe_col(df, "GeneRatio", NA_real_),
+      BgRatio = safe_col(df, "BgRatio", NA_real_),
+      RichFactor = safe_col(df, "RichFactor", NA_real_),
+      FoldEnrichment = safe_col(df, "FoldEnrichment", NA_real_),
+      zScore = safe_col(df, "zScore", NA_real_),
+      Count = safe_col(df, "Count", NA_integer_),
+      
+      # GSEA-specific columns
+      setSize = safe_col(df, "setSize", NA_integer_),
+      enrichmentScore = safe_col(df, "enrichmentScore", NA_real_),
+      NES = safe_col(df, "NES", NA_real_),
+      rank = safe_col(df, "rank", NA_real_),
+      leading_edge = safe_col(df, "leading_edge", NA_character_),
+      
+      Genes = as.character(genes)
+    )
+}
+
+
+combined_GO_semantic_supplementary_table <- bind_rows(
+  make_supplementary_go_table(
+    all_ORA_results_semantic,
+    method_name = "ORA"
+  ),
+  make_supplementary_go_table(
+    all_GSEA_results_semantic,
+    method_name = "GSEA"
+  )
+) %>%
+  arrange(
+    Ontology,
+    `Representative semantic GO term`,
+    Method,
+    Contrast,
+    `Adjusted p-value`
+  )
+
+combined_GO_semantic_supplementary_table_sig <- combined_GO_semantic_supplementary_table %>%
+  filter(`Adjusted p-value` < 0.05)
+
+combined_GO_semantic_supplementary_table_simple <- combined_GO_semantic_supplementary_table_sig %>%
+  dplyr::select(
+    Method,
+    Contrast,
+    Ontology,
+    `Original GO ID`,
+    `Original GO term`,
+    `Semantic cluster ID`,
+    `Representative semantic GO ID`,
+    `Representative semantic GO term`,
+    `Adjusted p-value`,
+    GeneRatio,
+    Count,
+    setSize,
+    FoldEnrichment,
+    NES,
+    Genes
+  ) %>%
+  arrange(
+    Ontology,
+    `Representative semantic GO term`,
+    Method,
+    Contrast,
+    `Adjusted p-value`
+  )
+
+write.csv(
+  combined_GO_semantic_supplementary_table_simple,
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/results/combined_GO_semantic_supplementary_table_simple.csv",
+  row.names = FALSE
+)
 ```

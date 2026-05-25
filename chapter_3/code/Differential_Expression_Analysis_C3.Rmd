@@ -559,3 +559,269 @@ save.image("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio
   # load environment
 load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_DEA_Envrionment.RData")  
 ```
+
+
+# Making Supplementary table of DEA results, adding accession IDs and protein names
+
+I need to capture the protein accession numbers for all of the genes, and then get the uniprot protein ids too to make a supplementary table for my reseacrh paper.
+
+```{r DEA_supp}
+MS_DEA_data <- read.csv("C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/results/Multi_Stressor_all_Differential_Expression_Analysis_results.csv", header = T)
+
+str(MS_DEA_data)
+```
+
+> str(MS_DEA_data)
+'data.frame':	42101 obs. of  21 variables:
+ $ gene                      : chr  "evm.TU.utg4.1" "evm.TU.utg4.3" "evm.TU.utg4.4" "evm.TU.utg4.5" ...
+ $ LFC_diesel_only_wald      : num  -3.15e-05 -7.85e-05 1.23e-04 -3.06e-05 -2.91e-04 ...
+ $ padj_diesel_only_wald     : num  1 1 1 1 1 ...
+ $ LFC_salinity_only_wald    : num  0.506 0.257 0.152 -3.087 -0.311 ...
+ $ padj_salinity_only_wald   : num  3.30e-01 6.55e-01 8.08e-01 1.35e-05 5.13e-01 ...
+ $ LFC_diesel_added_wald     : num  0.226 -0.165 0.683 0.244 0.427 ...
+ $ padj_diesel_added_wald    : num  0.6126 0.7415 0.0883 0.5576 0.2751 ...
+ $ LFC_salinity_added_wald   : num  1.243 0.191 0.901 -1.702 0.767 ...
+ $ padj_salinity_added_wald  : num  0.02726 0.75923 0.08463 0.00654 0.07655 ...
+ $ LFC_interactive_only_wald : num  0.1143 -0.0204 0.1682 0.1161 0.4166 ...
+ $ padj_interactive_only_wald: num  0.837 0.985 0.729 0.808 0.304 ...
+ $ LFC_combined_wald         : num  1.0951 -0.0126 1.332 -1.8966 0.2713 ...
+ $ padj_combined_wald        : num  0.04766 0.98721 0.0114 0.00287 0.58625 ...
+ $ LFC_diesel_only_LRT       : num  -0.175 -0.359 0.54 -0.211 -0.625 ...
+ $ padj_diesel_only_LRT      : num  0.999 0.999 0.999 0.999 0.999 ...
+ $ LFC_salinity_only_LRT     : num  -0.565 0.491 0.276 -3.945 -0.466 ...
+ $ padj_salinity_only_LRT    : num  0.505963 0.619962 0.780221 0.000236 0.565191 ...
+ $ LFC_full_model_LRT        : num  0.973 -0.149 1.113 1.225 1.45 ...
+ $ padj.x                    : num  4.26e-02 7.08e-01 1.67e-02 1.69e-05 1.71e-01 ...
+ $ LFC_interactive_only_LRT  : num  0.973 -0.149 1.113 1.225 1.45 ...
+ $ padj.y                    : num  0.822 0.983 0.709 0.79 0.301 ...
+ 
+This differential expression analysis results file contains LFCs and P-adjusted values for all of the contrasts of interest, with "gene" = the gene names of the species proteins
+ 
+```{r DEA_supp_2}
+matching_file <- read.table(
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_2/data/temp_storage/genome_matching_file.txt",
+  header = FALSE,
+  sep = "\t",
+  stringsAsFactors = FALSE
+)
+
+# Change the name of the columns to be identical ----
+{
+  names(matching_file)[names(matching_file) == "V13"] <- "ID"
+  names(matching_file)[names(matching_file) == "V1"] <- "GENE"
+}
+
+str(matching_file)
+```
+
+> str(matching_file)
+'data.frame':	518071 obs. of  13 variables:
+ $ GENE: chr  "evm.utg4.3" "evm.utg4.3" "evm.utg4.3" "evm.utg4.3" ...
+ $ V2  : chr  "tr|A0A6P8J6P1|A0A6P8J6P1_ACTTE" "tr|A0A6P8J6P1|A0A6P8J6P1_ACTTE" "tr|A0A913Y6V9|A0A913Y6V9_EXADI" "tr|A0A6P8J1S8|A0A6P8J1S8_ACTTE" ...
+ $ V3  : num  100 100 62.3 59.1 53.7 ...
+ $ V4  : int  259 259 252 242 242 242 249 242 249 193 ...
+ $ V5  : int  0 0 94 97 110 123 136 124 140 89 ...
+ $ V6  : int  0 0 1 1 1 0 0 1 0 0 ...
+ $ V7  : int  1 1 1 1 1 1 1 1 1 50 ...
+ $ V8  : int  259 259 251 240 240 242 249 240 249 242 ...
+ $ V9  : int  1 1 27 1 1 1 1 1 58 1 ...
+ $ V10 : int  259 259 278 242 242 242 249 242 306 193 ...
+ $ V11 : num  0.00 0.00 6.72e-115 3.26e-101 1.69e-93 ...
+ $ V12 : num  539 539 334 299 279 259 246 243 238 229 ...
+ $ ID  : chr  "A0A6P8J6P1" "A0A6P8J6P1" "A0A913Y6V9" "A0A6P8J1S8" ...
+ 
+ID = protein accession from blastp hit
+GENE = gene name of my species
+
+The names of the genes are unaligned in their naming conventions:
+- the MS_DEA_data file needs all gene names to remove ".TU", and replace all ".path" with ".mrna", this will make the naming conventions identical between the files
+
+I need to match the protein accession IDs to the gene names in the MS_DEA_data file
+
+```{r match}
+MS_DEA_data$gene <- gsub("\\.TU", "", MS_DEA_data$gene) # Removing "TU" part of names
+MS_DEA_data$gene <- gsub("path", "mrna", MS_DEA_data$gene) # Replacing "path" -> "mrna"
+
+names(matching_file)[names(matching_file) == "GENE"] <- "gene"
+
+result <- matching_file |>
+  group_by(gene) |>
+  slice_min(order_by = V11, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  dplyr::select(
+    gene,
+    blast_hit = V2,
+    blast_percent_identity = V3,
+    blast_alignment_length = V4,
+    blast_evalue = V11,
+    blast_bitscore = V12,
+    ID
+  )
+
+MS_DEA_accessions <- MS_DEA_data |>
+  mutate(
+    gene_original = gene,
+    gene = gsub("\\.TU", "", gene),
+    gene = gsub("path", "mrna", gene)
+  ) |>
+  left_join(result, by = "gene")
+
+```
+
+How do I then get the protein names using the accessions from UNIPROT in R?
+
+```{r UNIRPROT}
+install.packages("uniprotREST", repos = "https://csdaw.r-universe.dev")
+
+library(dplyr)
+library(uniprotREST)
+
+# Get unique, non-missing UniProt accessions from your DEA table
+accessions <- MS_DEA_accessions |>
+  pull(ID) |>
+  unique() |>
+  na.omit()
+
+length(accessions)
+
+# query uniprot
+uniprot_annot <- uniprot_map(
+  ids = accessions,
+  from = "UniProtKB_AC-ID",
+  to = "UniProtKB",
+  format = "tsv",
+  fields = c(
+    "accession",
+    "id",
+    "protein_name",
+    "gene_names",
+    "organism_name",
+    "reviewed"
+  )
+)
+
+# clean returned column names
+names(uniprot_annot) <- make.names(names(uniprot_annot))
+
+str(uniprot_annot)
+
+MS_DEA_supp <- MS_DEA_accessions |>
+  left_join(
+    uniprot_annot |>
+      dplyr::select(
+        ID = From,
+        UniProt_accession = Entry,
+        UniProt_protein_ID = Entry.Name,
+        UniProt_protein_name = Protein.names,
+        UniProt_gene_names = Gene.Names,
+        UniProt_organism = Organism,
+        UniProt_reviewed_status = Reviewed
+      ),
+    by = "ID"
+  )
+
+write.csv(
+  MS_DEA_supp,
+  "C:/Users/r02hw22/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/chapter_3/results/Supplementary_DEA_table_with_UniProt_annotations.csv",
+  row.names = FALSE
+)
+```
+
+
+## wide to long
+
+```{r w2l}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+str(MS_DEA_supp)
+
+# change names of columns to work
+names(MS_DEA_supp)[names(MS_DEA_supp) == "padj.x"] <- "padj_full_model_LRT"
+names(MS_DEA_supp)[names(MS_DEA_supp) == "padj.y"] <- "padj_interactive_only_LRT"
+
+MS_DEA_supp_long <- MS_DEA_supp |>
+  pivot_longer(
+    cols = matches("^(LFC|padj)_"),
+    names_to = c(".value", "contrast_full"),
+    names_pattern = "^(LFC|padj)_(.*)$"
+  ) |>
+  mutate(
+    test = case_when(
+      str_detect(contrast_full, "_wald$") ~ "wald",
+      str_detect(contrast_full, "_LRT$") ~ "LRT",
+      TRUE ~ NA_character_
+    ),
+    contrast = str_remove(contrast_full, "_(wald|LRT)$")
+  ) |>
+  dplyr::select(
+    gene,
+    ID,
+    UniProt_accession,
+    UniProt_protein_ID,
+    UniProt_protein_name,
+    contrast,
+    test,
+    LFC,
+    padj,
+    everything(),
+    -contrast_full
+  )
+
+MS_DEA_supp_long |>
+  count(contrast, test)
+
+str(MS_DEA_supp_long)
+
+## reduce redundancy
+MS_gene_annotation <- MS_DEA_supp_long |>
+  dplyr::select(
+    gene,
+    gene_original,
+    ID,
+    UniProt_accession,
+    UniProt_protein_ID,
+    UniProt_protein_name,
+    UniProt_gene_names,
+    UniProt_organism,
+    UniProt_reviewed_status,
+    blast_hit,
+    blast_percent_identity,
+    blast_alignment_length,
+    blast_evalue,
+    blast_bitscore
+  ) |>
+  distinct()
+
+MS_DEA_results_long <- MS_DEA_supp_long |>
+  dplyr::select(
+    gene,
+    contrast,
+    test,
+    LFC,
+    padj
+  )
+
+MS_DEA_supp_long_reduced <- MS_DEA_supp_long |>
+  dplyr::select(
+    gene,
+    ID,
+    UniProt_protein_ID,
+    UniProt_protein_name,
+    contrast,
+    test,
+    LFC,
+    padj,
+    blast_percent_identity,
+    blast_evalue,
+    blast_bitscore
+  )
+
+# significant results only
+MS_DEA_supp_long_sig <- MS_DEA_supp_long_reduced |>
+  filter(!is.na(padj), padj < 0.05)
+
+MS_DEA_supp_long_sig <- MS_DEA_supp_long_sig |>
+  filter(!is.na(test), test != "LRT")
+```

@@ -1,0 +1,7 @@
+"set_1","set_2","n_overlap","semantic_description"
+"Acute Methylation","Acute Expression",0,""
+"Acute Methylation","Primed Methylation",0,""
+"Acute Methylation","Primed Expression",0,""
+"Acute Expression","Primed Methylation",2,"cilium assembly; protein dimerization activity"
+"Acute Expression","Primed Expression",1,"G protein-coupled receptor activity"
+"Primed Methylation","Primed Expression",0,""

@@ -1055,6 +1055,15 @@ exp1_volcano_plot_without_outlier_with_lfcshrink <- ggplot(
 # Save the merged results to find which genes are significant:
 print(exp1_volcano_plot_without_outlier_with_lfcshrink)
 
+png(
+  "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 1/Results/Figures/Acute_DEA_WO_Clone.png",
+  width = 8,
+  height = 7,
+  units = "in",
+  res = 900
+)
+exp1_volcano_plot_without_outlier_with_lfcshrink
+dev.off()
 
 
 

@@ -1,0 +1,106 @@
+experiment,data_type,set_name,GO_ID,GO_description,representative_name,semantic_cluster,term
+Acute,Methylation,Acute Methylation,GO:0006397,mRNA processing,NA,RNA metabolic process,RNA metabolic process
+Acute,Methylation,Acute Methylation,GO:0007156,homophilic cell adhesion via plasma membrane adhesion molecules,NA,cell adhesion,cell adhesion
+Acute,Methylation,Acute Methylation,GO:0006281,DNA repair,NA,RNA metabolic process,RNA metabolic process
+Acute,Methylation,Acute Methylation,GO:0000184,"nuclear-transcribed mRNA catabolic process, nonsense-mediated decay",NA,RNA metabolic process,RNA metabolic process
+Acute,Methylation,Acute Methylation,GO:0006635,fatty acid beta-oxidation,NA,fatty acid beta-oxidation,fatty acid beta-oxidation
+Acute,Methylation,Acute Methylation,GO:0010571,positive regulation of nuclear cell cycle DNA replication,NA,positive regulation of nuclear cell cycle DNA replication,positive regulation of nuclear cell cycle DNA replication
+Acute,Methylation,Acute Methylation,GO:0030705,cytoskeleton-dependent intracellular transport,NA,transmembrane transport,transmembrane transport
+Acute,Methylation,Acute Methylation,GO:0043631,RNA polyadenylation,NA,RNA metabolic process,RNA metabolic process
+Acute,Methylation,Acute Methylation,GO:0045087,innate immune response,NA,innate immune response,innate immune response
+Acute,Methylation,Acute Methylation,GO:0070507,regulation of microtubule cytoskeleton organization,NA,regulation of microtubule cytoskeleton organization,regulation of microtubule cytoskeleton organization
+Acute,Methylation,Acute Methylation,GO:1901987,regulation of cell cycle phase transition,NA,regulation of cell cycle phase transition,regulation of cell cycle phase transition
+Acute,Methylation,Acute Methylation,GO:0006468,protein phosphorylation,NA,protein phosphorylation,protein phosphorylation
+Acute,Methylation,Acute Methylation,GO:0035368,selenocysteine insertion sequence binding,NA,nucleic acid binding,nucleic acid binding
+Acute,Methylation,Acute Methylation,GO:0005044,scavenger receptor activity,NA,scavenger receptor activity,scavenger receptor activity
+Acute,Methylation,Acute Methylation,GO:0005509,calcium ion binding,NA,metal ion binding,metal ion binding
+Primed,Methylation,Primed Methylation,GO:0007154,cell communication,NA,cell communication,cell communication
+Primed,Methylation,Primed Methylation,GO:0098632,cell-cell adhesion mediator activity,NA,cell-cell adhesion mediator activity,cell-cell adhesion mediator activity
+Primed,Methylation,Primed Methylation,GO:0060271,cilium assembly,NA,cilium assembly,cilium assembly
+Primed,Methylation,Primed Methylation,GO:0046983,protein dimerization activity,NA,protein dimerization activity,protein dimerization activity
+Acute,Expression,Acute Expression,GO:0000012,single strand break repair,NA,NA,single strand break repair
+Acute,Expression,Acute Expression,GO:0000978,DNA-binding transcription factor activity,NA,NA,DNA-binding transcription factor activity
+Acute,Expression,Acute Expression,GO:0001227,"DNA-binding transcription repressor activity, RNA polymerase II-specific",NA,NA,"DNA-binding transcription repressor activity, RNA polymerase II-specific"
+Acute,Expression,Acute Expression,GO:0001655,androgen biosynthetic process,NA,NA,androgen biosynthetic process
+Acute,Expression,Acute Expression,GO:0001786,calcium ion binding,NA,NA,calcium ion binding
+Acute,Expression,Acute Expression,GO:0003825,"alpha,alpha-trehalose-phosphate synthase (GDP-forming) activity",NA,NA,"alpha,alpha-trehalose-phosphate synthase (GDP-forming) activity"
+Acute,Expression,Acute Expression,GO:0003884,D-amino-acid oxidase activity,NA,NA,D-amino-acid oxidase activity
+Acute,Expression,Acute Expression,GO:0004104,cholinesterase activity,NA,NA,cholinesterase activity
+Acute,Expression,Acute Expression,GO:0004143,ATP binding,NA,NA,ATP binding
+Acute,Expression,Acute Expression,GO:0004573,Glc3Man9GlcNAc2 oligosaccharide glucosidase activity,NA,NA,Glc3Man9GlcNAc2 oligosaccharide glucosidase activity
+Acute,Expression,Acute Expression,GO:0004586,ornithine decarboxylase activity,NA,NA,ornithine decarboxylase activity
+Acute,Expression,Acute Expression,GO:0004715,ATP binding,NA,NA,ATP binding
+Acute,Expression,Acute Expression,GO:0004805,"alpha,alpha-trehalose-phosphate synthase (UDP-forming) activity",NA,NA,"alpha,alpha-trehalose-phosphate synthase (UDP-forming) activity"
+Acute,Expression,Acute Expression,GO:0004838,L-tyrosine:2-oxoglutarate aminotransferase activity,NA,NA,L-tyrosine:2-oxoglutarate aminotransferase activity
+Acute,Expression,Acute Expression,GO:0004869,cysteine-type endopeptidase inhibitor activity,NA,NA,cysteine-type endopeptidase inhibitor activity
+Acute,Expression,Acute Expression,GO:0005160,cytokine activity,NA,NA,cytokine activity
+Acute,Expression,Acute Expression,GO:0005313,calcium ion binding,NA,NA,calcium ion binding
+Acute,Expression,Acute Expression,GO:0005991,trehalose metabolic process,NA,NA,trehalose metabolic process
+Acute,Expression,Acute Expression,GO:0005992,trehalose biosynthetic process,NA,NA,trehalose biosynthetic process
+Acute,Expression,Acute Expression,GO:0006091,bioluminescence,NA,NA,bioluminescence
+Acute,Expression,Acute Expression,GO:0006396,RNA processing,NA,NA,RNA processing
+Acute,Expression,Acute Expression,GO:0006559,L-phenylalanine catabolic process,NA,NA,L-phenylalanine catabolic process
+Acute,Expression,Acute Expression,GO:0006572,L-phenylalanine catabolic process,NA,NA,L-phenylalanine catabolic process
+Acute,Expression,Acute Expression,GO:0006596,polyamine biosynthetic process,NA,NA,polyamine biosynthetic process
+Acute,Expression,Acute Expression,GO:0006855,bile acid and bile salt transport,NA,NA,bile acid and bile salt transport
+Acute,Expression,Acute Expression,GO:0006941,actin filament organization,NA,NA,actin filament organization
+Acute,Expression,Acute Expression,GO:0007205,protein kinase C-activating G protein-coupled receptor signaling pathway,NA,NA,protein kinase C-activating G protein-coupled receptor signaling pathway
+Acute,Expression,Acute Expression,GO:0007476,autophagosome maturation,NA,NA,autophagosome maturation
+Acute,Expression,Acute Expression,GO:0008061,chitin binding,NA,NA,chitin binding
+Acute,Expression,Acute Expression,GO:0008083,growth factor activity,NA,NA,growth factor activity
+Acute,Expression,Acute Expression,GO:0008218,bioluminescence,NA,NA,bioluminescence
+Acute,Expression,Acute Expression,GO:0008597,calcium ion binding,NA,NA,calcium ion binding
+Acute,Expression,Acute Expression,GO:0008836,diaminopimelate decarboxylase activity,NA,NA,diaminopimelate decarboxylase activity
+Acute,Expression,Acute Expression,GO:0009089,lysine biosynthetic process via diaminopimelate,NA,NA,lysine biosynthetic process via diaminopimelate
+Acute,Expression,Acute Expression,GO:0009134,nucleoside diphosphate catabolic process,NA,NA,nucleoside diphosphate catabolic process
+Acute,Expression,Acute Expression,GO:0009311,oligosaccharide metabolic process,NA,NA,oligosaccharide metabolic process
+Acute,Expression,Acute Expression,GO:0009381,DNA binding,NA,NA,DNA binding
+Acute,Expression,Acute Expression,GO:0009432,DNA repair,NA,NA,DNA repair
+Acute,Expression,Acute Expression,GO:0010033,negative regulation of endopeptidase activity,NA,NA,negative regulation of endopeptidase activity
+Acute,Expression,Acute Expression,GO:0010114,epigenetic regulation of gene expression,NA,NA,epigenetic regulation of gene expression
+Acute,Expression,Acute Expression,GO:0010759,myoblast migration involved in skeletal muscle regeneration,NA,NA,myoblast migration involved in skeletal muscle regeneration
+Acute,Expression,Acute Expression,GO:0010940,autophagosome assembly,NA,NA,autophagosome assembly
+Acute,Expression,Acute Expression,GO:0015229,L-ascorbic acid transmembrane transporter activity,NA,NA,L-ascorbic acid transmembrane transporter activity
+Acute,Expression,Acute Expression,GO:0015293,symporter activity,NA,NA,symporter activity
+Acute,Expression,Acute Expression,GO:0016684,heme binding,NA,NA,heme binding
+Acute,Expression,Acute Expression,GO:0016830,carbon-carbon lyase activity,NA,NA,carbon-carbon lyase activity
+Acute,Expression,Acute Expression,GO:0017147,Wnt-protein binding,NA,NA,Wnt-protein binding
+Acute,Expression,Acute Expression,GO:0018126,positive regulation of translational termination,NA,NA,positive regulation of translational termination
+Acute,Expression,Acute Expression,GO:0019148,D-cysteine desulfhydrase activity,NA,NA,D-cysteine desulfhydrase activity
+Acute,Expression,Acute Expression,GO:0021517,cell division,NA,NA,cell division
+Acute,Expression,Acute Expression,GO:0021978,apoptotic process involved in development,NA,NA,apoptotic process involved in development
+Acute,Expression,Acute Expression,GO:0030246,carbohydrate binding,NA,NA,carbohydrate binding
+Acute,Expression,Acute Expression,GO:0030878,camera-type eye development,NA,NA,camera-type eye development
+Acute,Expression,Acute Expression,GO:0031433,actin filament binding,NA,NA,actin filament binding
+Acute,Expression,Acute Expression,GO:0032093,ATP binding,NA,NA,ATP binding
+Acute,Expression,Acute Expression,GO:0032474,cilium assembly,NA,NA,cilium assembly
+Acute,Expression,Acute Expression,GO:0032526,response to retinoic acid,NA,NA,response to retinoic acid
+Acute,Expression,Acute Expression,GO:0032956,regulation of actin cytoskeleton organization,NA,NA,regulation of actin cytoskeleton organization
+Acute,Expression,Acute Expression,GO:0033387,putrescine biosynthetic process from ornithine,NA,NA,putrescine biosynthetic process from ornithine
+Acute,Expression,Acute Expression,GO:0035567,canonical Wnt signaling pathway,NA,NA,canonical Wnt signaling pathway
+Acute,Expression,Acute Expression,GO:0042147,"retrograde transport, endosome to Golgi",NA,NA,"retrograde transport, endosome to Golgi"
+Acute,Expression,Acute Expression,GO:0042277,G protein-coupled receptor activity,NA,NA,G protein-coupled receptor activity
+Acute,Expression,Acute Expression,GO:0042803,protein homodimerization activity,NA,NA,protein homodimerization activity
+Acute,Expression,Acute Expression,GO:0042908,amino acid import across plasma membrane,NA,NA,amino acid import across plasma membrane
+Acute,Expression,Acute Expression,GO:0043490,aspartate transmembrane transport,NA,NA,aspartate transmembrane transport
+Acute,Expression,Acute Expression,GO:0046416,D-amino acid metabolic process,NA,NA,D-amino acid metabolic process
+Acute,Expression,Acute Expression,GO:0046548,positive regulation of gene expression,NA,NA,positive regulation of gene expression
+Acute,Expression,Acute Expression,GO:0046983,protein dimerization activity,NA,NA,protein dimerization activity
+Acute,Expression,Acute Expression,GO:0048536,blood vessel development,NA,NA,blood vessel development
+Acute,Expression,Acute Expression,GO:0048538,abducens nerve formation,NA,NA,abducens nerve formation
+Acute,Expression,Acute Expression,GO:0048869,cellular developmental process,NA,NA,cellular developmental process
+Acute,Expression,Acute Expression,GO:0050882,autophagy,NA,NA,autophagy
+Acute,Expression,Acute Expression,GO:0050982,detection of mechanical stimulus,NA,NA,detection of mechanical stimulus
+Acute,Expression,Acute Expression,GO:0060395,positive regulation of pathway-restricted SMAD protein phosphorylation,NA,NA,positive regulation of pathway-restricted SMAD protein phosphorylation
+Acute,Expression,Acute Expression,GO:0070413,cellular response to desiccation,NA,NA,cellular response to desiccation
+Acute,Expression,Acute Expression,GO:0072572,histone binding,NA,NA,histone binding
+Acute,Expression,Acute Expression,GO:0097352,autophagosome maturation,NA,NA,autophagosome maturation
+Acute,Expression,Acute Expression,GO:1901031,negative regulation of TORC1 signaling,NA,NA,negative regulation of TORC1 signaling
+Acute,Expression,Acute Expression,GO:1903302,positive regulation of I-kappaB kinase/NF-kappaB signaling,NA,NA,positive regulation of I-kappaB kinase/NF-kappaB signaling
+Acute,Expression,Acute Expression,GO:1990837,"DNA-binding transcription factor activity, RNA polymerase II-specific",NA,NA,"DNA-binding transcription factor activity, RNA polymerase II-specific"
+Acute,Expression,Acute Expression,GO:1990961,xenobiotic detoxification by transmembrane export across the plasma membrane,NA,NA,xenobiotic detoxification by transmembrane export across the plasma membrane
+Acute,Expression,Acute Expression,GO:2000781,positive regulation of double-strand break repair,NA,NA,positive regulation of double-strand break repair
+Primed,Expression,Primed Expression,GO:0009755,hormone-mediated signaling pathway,NA,NA,hormone-mediated signaling pathway
+Primed,Expression,Primed Expression,GO:0000209,protein polyubiquitination,NA,NA,protein polyubiquitination
+Primed,Expression,Primed Expression,GO:0016500,G protein-coupled receptor activity,NA,NA,G protein-coupled receptor activity
+Primed,Expression,Primed Expression,GO:0030414,peptidase inhibitor activity,NA,NA,peptidase inhibitor activity

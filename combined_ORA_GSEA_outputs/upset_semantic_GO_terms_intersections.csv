@@ -1,0 +1,18 @@
+intersection,n_contrasts,n_terms
+Salinity,1,15
++ Diesel,1,12
+D + S + D*S,1,10
+Salinity & + Salinity & D + S + D*S,3,8
+D*S,1,7
++ Salinity,1,6
++ Diesel & + Salinity & D + S + D*S,3,2
+Salinity & + Diesel,2,2
++ Diesel & D*S,2,2
+Diesel,1,2
+Salinity & + Diesel & + Salinity,3,1
+Salinity & D + S + D*S & D*S,3,1
+Salinity & D + S + D*S,2,1
+Salinity & D*S,2,1
++ Diesel & D + S + D*S,2,1
++ Salinity & D + S + D*S,2,1
+D + S + D*S & D*S,2,1

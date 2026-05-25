@@ -1,0 +1,3 @@
+"ID","Description","GeneRatio","BgRatio","RichFactor","FoldEnrichment","zScore","pvalue","p.adjust","qvalue","geneID","Count","GO"
+"GO:0007156","homophilic cell adhesion via plasma membrane adhesion molecules",0.5,0.00828651685393259,0.00564971751412429,60.3389830508475,7.67110917774825,0.0165047520951357,0.0330095041902714,NA,"evm.utg376.57",1,"biological_processes"
+"GO:0016567","protein ubiquitination",0.5,0.0184925093632959,0.00253164556962025,27.0379746835443,5.05456143471597,0.0366438956080405,0.0366438956080405,NA,"evm.utg5059.68",1,"biological_processes"

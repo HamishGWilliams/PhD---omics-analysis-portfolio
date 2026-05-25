@@ -1,0 +1,561 @@
+---
+title: "Differential Expression Analysis C3"
+author: "Hamish Williams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Purpose of this Markdown
+
+I think for the 3rd - 4th time I am re-creating a github repository so that I can consolidate and refine my code into a more digestable format so it is easier to work with.
+
+This specific RMD will process and perform all of the analysis for fo chapter 3's omics side of things. This will not focus on making the plots. 
+
+Instead, at the end I will have created an image of the environment which should b able to be found in the ../RData directory of this chapters directory which I will load individuall in seperate scripts to make the figures or refine results later in other scripts. 
+
+# Load packages
+
+```{r load_packages}
+## Make Function to Install and Load Package list
+check_packages <- function(pkg_list) {
+  for (pkg in pkg_list) {
+    if (!require(pkg, character.only = TRUE)) {
+      print(paste(pkg, "is not installed, installing package..."))
+      install.packages(pkg) & suppressMessages(library(pkg, character.only = TRUE))
+    } else {
+      suppressMessages(library(pkg, character.only = TRUE))
+      print(paste(pkg, "is installed and loaded"))
+    }
+  }
+}
+
+## Generate a dataframe with a list of packages required
+pkg_list<-c("DESeq2",
+            "ggplot2",
+            "dplyr",
+            "tidyr",
+            "ggrepel",
+            "patchwork",
+            "forcats",
+            "purrr",
+            "ComplexUpset",
+            "grid",
+            "ComplexHeatmap",
+            "ggVennDiagram",
+            "patchwork")
+
+## Run Function::
+check_packages(pkg_list)
+```
+
+# Load environment from end
+```{r enviro_load}
+load("MS_DEA_Envrionment.RData")  
+```
+
+# Initial Data processing
+
+## Load data
+
+```{r load_data}
+# COunt Data
+counts <- as.matrix(read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Data/Processed/A_Equina_Counts_unstranded_copy.txt", header = T, sep = '\t'))
+
+countData <- as.matrix(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length,-X2)))
+{apply(countData, 2, as.numeric)
+  sapply(countData, as.numeric)
+  class(countData) <- "numeric"
+  storage.mode(countData) <- "numeric"}
+
+# Load colData
+colData <- read.table("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Data/MS_colData.txt", header = T, sep = '\t', 
+                      stringsAsFactors = TRUE)
+
+# remove outlier "X2" from colData
+colData <- subset(colData[c(1:24,26:32),])
+
+reorder_idx <- match(colnames(countData), rownames(colData))
+if (anyNA(reorder_idx)) {
+  stop("Name mismatch after match(); check for typos/duplicates in sample names.\n",
+       "Problem samples: ",
+       paste(colnames(countData)[is.na(reorder_idx)], collapse=", "))
+}
+colData <- colData[reorder_idx, , drop = FALSE]
+
+## Make the factors explicit and set "N" as the reference:
+colData$Diesel   <- factor(colData$Diesel,   levels = c("N","Y"))
+colData$Salinity <- factor(colData$Salinity, levels = c("N","Y"))
+```
+
+## calculate parameers and statistics
+
+```{r parameters_and_statistics}
+## CPM
+cpm <- {apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/sum(as.numeric(x)) * 10^6)}
+counts_rownames <- as.vector(row.names(counts))
+rownames(cpm) <- counts_rownames
+
+## Genelengths
+geneLengths <- as.vector(subset(counts, select = c(Length)))
+geneLengths <- as.vector(as.numeric(geneLengths))
+
+## RPKM
+rpkm <- {apply(X = subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)),
+               MARGIN = 2, 
+               FUN = function(x) {
+                 10^9 * as.numeric(x) / geneLengths / sum(as.numeric(x))
+               })
+}
+rownames(rpkm) <- counts_rownames
+
+## RPK
+rpk <- {apply(subset(counts, select = c(-Chr,-Start,-End,-Strand,-Length)), 2, 
+              function(x) as.numeric(x)/(geneLengths/1000))}
+rownames(rpk) <- counts_rownames
+
+## TPM
+tpm <- apply(rpk, 2, function(x) as.numeric(x) / sum(as.numeric(x)) * 10^6)
+rownames(tpm) <- counts_rownames
+
+## Variance
+V <- apply(tpm, 1, var) # Can make Heatmaps from these values ... 
+
+## Select top 100 genes:
+selectedGenes <- names(V[order(V, decreasing = T)][1:100])
+
+## Check each step for errors:
+colSums(cpm) # = 10^6 for ALL
+colSums(rpkm) # Different values
+colSums(tpm) # = 10^6 for ALL
+
+pheatmap(tpm[selectedGenes,], scale = 'row', 
+         show_rownames = FALSE, 
+         annotation_col = colData[c("Group")])
+
+# Continue code for figure in new file, something like:
+  # Code/Heatmap_plotting_code.R
+```
+
+
+# Differential Expression ANalyses
+
+## LRT models ----
+
+### Diesel only
+```{r diesel_H0}
+## Diesel ~ H0
+# Subset data to only include samples with diesel or control treatments:
+{
+keep <- colData$Salinity == "N"
+
+counData_keep <- countData[, keep]
+colData_keep <- droplevels(colData[keep,])
+
+dds <- DESeqDataSetFromMatrix(countData = countData[, keep],
+                              colData   = droplevels(colData[keep,]),
+                              design    = ~ Diesel)
+
+# (Optional but harmless) prefilter very low counts:
+dds <- dds[rowSums(counts(dds) >= 10) >= 2, ]
+
+# LRT
+dds_diesel_H0 <- DESeq(dds, test = "LRT",
+                     reduced = ~ 1)
+
+  # Shrinking LFC for later comparison
+  # see ~/Code/LRT_and_Wald_LFC_Comparison_plots.R for plotting
+res_diesel_H0_ashr <- lfcShrink(
+  dds  = dds_diesel_H0,
+  coef = "Diesel_Y_vs_N",   # replace with exact name from resultsNames(dds_diesel_H0)
+  type = "ashr"
+)
+
+res_diesel_H0 <- results(dds_diesel_H0)
+res_diesel_H0 <- res_diesel_H0[order(res_diesel_H0$padj),]
+view <- as.data.frame(res_diesel_H0)
+sig_diesel_H0 <- subset(res_diesel_H0, !is.na(padj) & padj < 0.05)
+sig_diesel_H0
+}
+  # 0 significant DEGs
+```
+
+### Salinity only
+```{r salinity_H0}
+## Salinity ~ H0
+# Subset data to only include samples with Salinity or control treatments:
+{
+keep <- colData$Diesel == "N"
+
+counData_keep <- countData[, keep]
+colData_keep <- droplevels(colData[keep,])
+
+dds <- DESeqDataSetFromMatrix(countData = countData[, keep],
+                              colData   = droplevels(colData[keep,]),
+                              design    = ~ Salinity)
+
+# (Optional but harmless) prefilter very low counts:
+dds <- dds[rowSums(counts(dds) >= 10) >= 2, ]
+
+# LRT
+dds_Salinity_H0 <- DESeq(dds, test = "LRT",
+                       reduced = ~ 1)
+
+  # Shrinking LFC for later comparison
+  # see ~/Code/LRT_and_Wald_LFC_Comparison_plots.R for plotting
+    # shrink the Salinity coefficient using ashr for later
+    res_salinity_H0_ashr <- lfcShrink(
+      dds  = dds_Salinity_H0,
+      coef = "Salinity_Y_vs_N",
+      type = "ashr"
+    )
+
+res_Salinity_H0 <- results(dds_Salinity_H0)
+res_Salinity_H0 <- res_Salinity_H0[order(res_Salinity_H0$padj),]
+view <- as.data.frame(res_Salinity_H0)
+sig_Salinity_H0 <- subset(res_Salinity_H0, !is.na(padj) & padj < 0.05)
+sig_Salinity_H0
+}
+  # 5439 DEGs
+```
+
+### Diesl + Salinity + D*S
+```{r D_and_S_H0}
+## Diesel + Salinity + D*S ~ H0
+{
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData   = colData,
+                              design    = ~ Diesel + Salinity + Diesel*Salinity)
+
+# (Optional but harmless) prefilter very low counts:
+dds <- dds[rowSums(counts(dds) >= 10) >= 2, ]
+
+# LRT
+dds_full_model_H0 <- DESeq(dds, test = "LRT",
+                        reduced = ~ 1)
+
+res_full_model_H0 <- results(dds_full_model_H0)
+res_full_model_H0 <- res_full_model_H0[order(res_full_model_H0$padj),]
+view <- as.data.frame(res_full_model_H0)
+sig_full_model_H0 <- subset(res_full_model_H0, !is.na(padj) & padj < 0.05)
+sig_full_model_H0
+}
+# 10844 DEGs
+```
+
+### D*S interaction only
+```{r LRT_interaction}
+{
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData   = colData,
+                              design    = ~ Diesel + Salinity + Diesel * Salinity)
+
+# (Optional but harmless) prefilter very low counts:
+dds <- dds[rowSums(counts(dds) >= 10) >= 2, ]
+
+# LRT
+dds_interactive_LRT <- DESeq(dds, test = "LRT",
+                       reduced = ~ Diesel + Salinity)
+
+res_interactive_LRT <- results(dds_interactive_LRT)
+res_interactive_LRT <- res_interactive_LRT[order(res_interactive_LRT$padj),]
+res_interactive_LRT <- as.data.frame(res_interactive_LRT)
+sig_interactive_LRT <- subset(res_interactive_LRT, !is.na(padj) & padj < 0.05)
+sig_interactive_LRT
+}
+
+# 57 DEGs
+```
+
+## Final LRT results:
+- Diesel only   :    0 
+- Salinity Only :    5439
+- D + S + D*S   :    10844
+- D * S only    :    57
+
+
+### Combine results
+
+```{r combine_LRT_results}
+# combine all results
+as_prefixed_df <- function(res, prefix) {
+  stopifnot(!is.null(rownames(res)))
+  df <- as.data.frame(res)              # from DESeqResults/DataFrame -> data.frame
+  df$gene <- rownames(res)
+  
+  keep_cols <- intersect(c("baseMean","log2FoldChange","lfcSE","stat","pvalue","padj"),
+                         names(df))
+  df <- df[, c("gene", keep_cols), drop = FALSE]
+  
+  # Coerce any Rle/list-like columns to plain vectors
+  for (nm in names(df)) df[[nm]] <- as.vector(df[[nm]])
+  
+  # Deduplicate genes (keep first)
+  df <- df[!duplicated(df$gene), , drop = FALSE]
+  
+  # Prefix non-key columns
+  if (ncol(df) > 1) names(df)[-1] <- paste0(prefix, "_", names(df)[-1])
+  df
+}
+
+# Build prefixed tables
+diesel_df   <- as_prefixed_df(res_diesel_H0,     "dieselLRT")
+salinity_df <- as_prefixed_df(res_Salinity_H0,   "salinityLRT")
+full_df     <- as_prefixed_df(res_full_model_H0, "fullLRT")
+
+# Merge by gene (full outer join) using base merge to avoid tibble/S4 quirks
+merged_lrt <- Reduce(function(x, y) merge(x, y, by = "gene", all = TRUE),
+                     list(diesel_df, salinity_df, full_df))
+```
+
+
+## Wald Models ----
+
+### perform analysis:
+```{r Wald_DEA}
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData   = colData,
+                              design    = ~ Diesel + Salinity + Diesel:Salinity)
+
+# (Optional but harmless) prefilter very low counts:
+dds <- dds[rowSums(counts(dds) >= 10) >= 2, ] 
+    # !!! realising this wasn't applied to all Wald methods, so some 
+      # changes to results are coming as a result...
+
+dds_wald <- DESeq(dds, test = "Wald")
+resultsNames(dds_wald)
+# You'll likely see names like:
+#   "Diesel_Y_vs_N"
+#   "Salinity_Y_vs_N"
+#   "DieselY.SalinityY"   # the interaction coefficient
+```
+
+### Diesel ~ H0
+```{r Diesel_only_Wald}
+## Diesel ~ H0
+# Do not need to subset the samples because interactions are modelled in the Wald
+# design, and we only specify for diesel effects when salinity is = "N"
+res_Diesel_at_SalN <- lfcShrink(dds_wald, coef = "Diesel_Y_vs_N", type = "ashr")
+res_Diesel_at_SalN <- as.data.frame(res_Diesel_at_SalN)
+sum(res_Diesel_at_SalN$padj < 0.05, na.rm = T)
+
+## UNsrhunk results for comparison
+res_Diesel_at_SalN_no_shrink <- results(dds_wald, name = "Diesel_Y_vs_N")
+```
+### Salinity ~ H0
+```{r Salinity_only_Wald}
+## Salinity ~ H0
+res_Sal_at_DieselN <- lfcShrink(dds_wald, coef = "Salinity_Y_vs_N", type = "ashr")
+res_Sal_at_DieselN <- as.data.frame(res_Sal_at_DieselN)
+sum(res_Sal_at_DieselN$padj < 0.05, na.rm = T)
+
+# unshrunk results for comparison
+res_Sal_at_DieselN_no_shrink <- results(dds_wald, name = "Salinity_Y_vs_N")
+```
+
+### Diesel + Salinity + D*S
+```{r full_additive_Wald}
+# Diesel + Salinity + D*S ~ H0
+res_combined_additive <- lfcShrink(dds_wald, 
+                                   contrast = list(c("Diesel_Y_vs_N", 
+                                                     "Salinity_Y_vs_N",
+                                                     "DieselY.SalinityY")), 
+                                   type = "ashr")
+
+res_combined_additive <- as.data.frame(res_combined_additive)
+
+sum(res_combined_additive$padj < 0.05, na.rm = T)
+```
+
+### Diesel * Salinity Interaction only
+```{r interaction_only_Wald}
+res_interactive_Wald <- lfcShrink(dds_wald, 
+                                  coef = "DieselY.SalinityY",
+                                  type = "ashr") 
+
+res_interactive_Wald <- as.data.frame(res_interactive_Wald)
+
+sum(res_interactive_Wald$padj < 0.05, na.rm = T)
+```
+### + Diesel Effect
+```{r add_diesel_wald}
+res_Sal_at_DieselY <- lfcShrink(dds_wald, 
+                                contrast = list(c("Diesel_Y_vs_N", 
+                                                  "DieselY.SalinityY")), 
+                                type = "ashr")
+
+res_Sal_at_DieselY <- as.data.frame(res_Sal_at_DieselY)
+
+sum(res_Sal_at_DieselY$padj < 0.05, na.rm = T)
+```
+### + Salinity Effect
+```{r add_salinity_wald}
+res_Diesel_at_SalY <- lfcShrink(dds_wald, 
+                                contrast = list(c("Salinity_Y_vs_N", 
+                                                  "DieselY.SalinityY")), 
+                                type = "ashr")
+
+res_Diesel_at_SalY <- as.data.frame(res_Diesel_at_SalY)
+
+sum(res_Diesel_at_SalY$padj < 0.05, na.rm = T)
+```
+
+## Wald Final results ----
+diesel only       : 7
+salinity only     : 6412
+D + S + D*S       : 7610
+D*S               : 125
++ D               : 1625
++ S               : 7643
+
+# Merge and Save results
+
+```{r save results}
+# capture gene names to merge
+df <- data.frame(gene = rownames(res_Diesel_at_SalN))
+
+# reduce results to essential elements for merging
+diesel_only_merge_results <- as.data.frame(subset(res_Diesel_at_SalN[, c("log2FoldChange", "padj")]))
+diesel_only_merge_results$gene <- row.names(diesel_only_merge_results) 
+
+# and change column names to be able to identify them later
+names(diesel_only_merge_results)[names(diesel_only_merge_results) == "log2FoldChange"] <- "LFC_diesel_only_wald"
+names(diesel_only_merge_results)[names(diesel_only_merge_results) == "padj"] <- "padj_diesel_only_wald"
+
+# repeat for other results...
+salinity_only_merge_results <- as.data.frame(subset(res_Sal_at_DieselN[, c("log2FoldChange", "padj")]))
+salinity_only_merge_results$gene <- row.names(salinity_only_merge_results) 
+names(salinity_only_merge_results)[names(salinity_only_merge_results) == "log2FoldChange"] <- "LFC_salinity_only_wald"
+names(salinity_only_merge_results)[names(salinity_only_merge_results) == "padj"] <- "padj_salinity_only_wald"
+
+diesel_added_merge_results <- as.data.frame(subset(res_Sal_at_DieselY[, c("log2FoldChange", "padj")]))
+diesel_added_merge_results$gene <- row.names(diesel_added_merge_results) 
+names(diesel_added_merge_results)[names(diesel_added_merge_results) == "log2FoldChange"] <- "LFC_diesel_added_wald"
+names(diesel_added_merge_results)[names(diesel_added_merge_results) == "padj"] <- "padj_diesel_added_wald"
+
+salinity_added_merge_results <- as.data.frame(subset(res_Diesel_at_SalY[, c("log2FoldChange", "padj")]))
+salinity_added_merge_results$gene <- row.names(salinity_added_merge_results) 
+names(salinity_added_merge_results)[names(salinity_added_merge_results) == "log2FoldChange"] <- "LFC_salinity_added_wald"
+names(salinity_added_merge_results)[names(salinity_added_merge_results) == "padj"] <- "padj_salinity_added_wald"
+
+interactive_only_merge_results <- as.data.frame(subset(res_interactive_Wald[, c("log2FoldChange", "padj")]))
+interactive_only_merge_results$gene <- row.names(interactive_only_merge_results) 
+names(interactive_only_merge_results)[names(interactive_only_merge_results) == "log2FoldChange"] <- "LFC_interactive_only_wald"
+names(interactive_only_merge_results)[names(interactive_only_merge_results) == "padj"] <- "padj_interactive_only_wald"
+
+combined_merge_results <- as.data.frame(subset(res_combined_additive[, c("log2FoldChange", "padj")]))
+combined_merge_results$gene <- row.names(combined_merge_results) 
+names(combined_merge_results)[names(combined_merge_results) == "log2FoldChange"] <- "LFC_combined_wald"
+names(combined_merge_results)[names(combined_merge_results) == "padj"] <- "padj_combined_wald"
+
+# and repeat for all of the LRT results too ...
+diesel_H0_merge_results <- as.data.frame(subset(res_diesel_H0[, c("log2FoldChange", "padj")]))
+diesel_H0_merge_results$gene <- row.names(diesel_H0_merge_results) 
+names(diesel_H0_merge_results)[names(diesel_H0_merge_results) == "log2FoldChange"] <- "LFC_diesel_only_LRT"
+names(diesel_H0_merge_results)[names(diesel_H0_merge_results) == "padj"] <- "padj_diesel_only_LRT"
+
+salinity_H0_merge_results <- as.data.frame(subset(res_Salinity_H0[, c("log2FoldChange", "padj")]))
+salinity_H0_merge_results$gene <- row.names(salinity_H0_merge_results) 
+names(salinity_H0_merge_results)[names(salinity_H0_merge_results) == "log2FoldChange"] <- "LFC_salinity_only_LRT"
+names(salinity_H0_merge_results)[names(salinity_H0_merge_results) == "padj"] <- "padj_salinity_only_LRT"
+
+full_model_H0_merge_results <- as.data.frame(subset(res_full_model_H0[, c("log2FoldChange", "padj")]))
+full_model_H0_merge_results$gene <- row.names(full_model_H0_merge_results) 
+names(full_model_H0_merge_results)[names(full_model_H0_merge_results) == "log2FoldChange"] <- "LFC_full_model_LRT"
+names(full_model_H0_merge_results)[names(full_model_H0_merge_results) == "padj"] <- "padj_full_model_LRT"
+
+interactive_LRT_merge_results <- as.data.frame(subset(res_interactive_LRT[, c("log2FoldChange", "padj")]))
+interactive_LRT_merge_results$gene <- row.names(interactive_LRT_merge_results) 
+names(interactive_LRT_merge_results)[names(interactive_LRT_merge_results) == "log2FoldChange"] <- "LFC_interactive_only_LRT"
+names(interactive_LRT_merge_results)[names(interactive_LRT_merge_results) == "padj"] <- "padj_interactive_only_LRT"
+
+
+# make list
+dfs <- list(df,
+            diesel_only_merge_results,
+            salinity_only_merge_results,
+            diesel_added_merge_results,
+            salinity_added_merge_results,
+            interactive_only_merge_results,
+            combined_merge_results,
+            diesel_H0_merge_results,
+            salinity_H0_merge_results,
+            full_model_H0_merge_results,
+            interactive_LRT_merge_results)
+
+library(purrr)
+library(dplyr)
+# use "purrr" and "dplyr" to full_join
+merged_df <- purrr::reduce(dfs, dplyr::full_join, by = "gene")
+
+# save and export file
+write.csv(merged_df, "C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/Results/Multi_Stressor_all_Differential_Expression_Analysis_results.csv", row.names = FALSE)
+```
+
+
+# Prepare evironment to save result
+ Need to unload (rm()) files which are large and bulky and won't be used later:
+ 
+```{r clean-up}
+rm(colData_keep,
+   combined_merge_results,
+   counData_keep,
+   countData,
+   counts,
+   Counts_only,
+   cpm,
+   dds,
+   dds_diesel_H0,
+   dds_full_model_H0,
+   dds_interactive_LRT,
+   dds_Salinity_H0,
+   dds_wald,
+   df,
+   dfs,
+   diesel_added_merge_results,
+   diesel_H0_merge_results,
+   diesel_only_merge_results,
+   full_model_H0_merge_results,
+   interactive_LRT_merge_results,
+   interactive_only_merge_results,
+   res_combined_additive,
+   res_Diesel_at_SalN,
+   res_Diesel_at_SalN_DEGs,
+   res_Diesel_at_SalN_no_shrink,
+   res_Diesel_at_SalY,
+   res_diesel_H0,
+   res_diesel_H0_ashr,
+   res_full_model_H0,
+   res_interactive_LRT,
+   res_interactive_Wald,
+   res_Sal_at_DieselN,
+   res_Sal_at_DieselY,
+   res_Sal_at_DieselN_no_shrink,
+   res_Salinity_H0,
+   res_salinity_H0_ashr,
+   rpk,
+   rpkm,
+   salinity_added_merge_results,
+   salinity_H0_merge_results,
+   salinity_only_merge_results,
+   sig_diesel_H0,
+   sig_full_model_H0,
+   sig_interactive_LRT,
+   sig_Salinity_H0,
+   view,
+   counts_rownames,
+   geneLengths,
+   keep,
+   pkg_list,
+   reorder_idx,
+   check_packages)
+
+# Save environment
+save.image("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_DEA_Envrionment.RData") 
+  # load environment
+load("C:/Users/hamis/OneDrive/Documents/PhD/PhD---omics-analysis-portfolio/Chapter 3/RData/MS_DEA_Envrionment.RData")  
+```

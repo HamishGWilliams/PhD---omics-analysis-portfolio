@@ -1,0 +1,2 @@
+"ID","Description","GeneRatio","BgRatio","RichFactor","FoldEnrichment","zScore","pvalue","p.adjust","qvalue","geneID","Count","context","GO","region","experiment"
+"GO:0060271","cilium assembly",1,0.00664794007490637,0.00704225352112676,150.422535211268,12.2238510793967,0.00664794007490643,0.00664794007490643,NA,"evm.utg1032.43",1,"CHH","Biological Processes","three_prime_UTR","Primed Experiment"
