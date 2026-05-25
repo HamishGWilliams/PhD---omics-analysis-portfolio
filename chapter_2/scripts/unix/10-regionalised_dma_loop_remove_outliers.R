@@ -1,13 +1,13 @@
 #!/usr/bin/env Rscript
 #SBATCH --job-name=regionalised_dma_no_outliers
-#SBATCH --mem=400G
+#SBATCH --mem=100G
 #SBATCH --partition=uoa-compute
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=h.williams.22@abdn.ac.uk
-#SBATCH --time=21-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
 #SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
 

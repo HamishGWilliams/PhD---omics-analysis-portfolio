@@ -8,13 +8,31 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=h.williams.22@abdn.ac.uk
 #SBATCH --time=5-00:00:00
+#SBATCH --export=NONE
 #SBATCH --output=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/outputs/%x_%j.out
 #SBATCH --error=/uoa/scratch/users/r02hw22/repos/PhD---omics-analysis-portfolio/chapter_2/logs/errors/%x_%j.err
 
 # -------------------------------
-# Modules
+# Locale fix for Perl tools
 # -------------------------------
 
+export LC_ALL=C
+export LANG=C
+unset LANGUAGE
+
+# -------------------------------
+# Reinitialise module system cleanly
+# -------------------------------
+
+if [ -f /etc/profile.d/lmod.sh ]; then
+    source /etc/profile.d/lmod.sh
+fi
+
+if [ -f /etc/profile.d/modules.sh ]; then
+    source /etc/profile.d/modules.sh
+fi
+
+module purge
 module load repeatmodeler/2.0.2
 module load repeatmasker/4.1.4
 
@@ -29,7 +47,6 @@ REPEAT_DIR="$CHAPTER_DIR/data/processed/repeats"
 
 LOG_DIR="$CHAPTER_DIR/logs"
 mkdir -p "$LOG_DIR/outputs" "$LOG_DIR/errors"
-
 mkdir -p "$REPEAT_DIR"
 
 # -------------------------------
@@ -79,6 +96,8 @@ echo "Genome FASTA: $GENOME_FASTA"
 echo "Flank GFF3:    $FLANK_GFF"
 echo "Repeat output: $REPEAT_DIR"
 echo "Threads:       $THREADS"
+echo "LC_ALL:        $LC_ALL"
+echo "LANG:          $LANG"
 
 # -------------------------------
 # 1. Build RepeatModeler database
@@ -86,7 +105,7 @@ echo "Threads:       $THREADS"
 
 echo "Building RepeatModeler database..."
 
-if [ ! -f "${DB_NAME}.nhr" ] && [ ! -f "${DB_NAME}.nin" ] && [ ! -f "${DB_NAME}.nsq" ]; then
+if [ ! -f "${DB_NAME}.nhr" ] || [ ! -f "${DB_NAME}.nin" ] || [ ! -f "${DB_NAME}.nsq" ]; then
     BuildDatabase \
         -name "$DB_NAME" \
         -engine ncbi \
@@ -108,8 +127,6 @@ if [ ! -f "$RMODELER_DIR/consensi.fa.classified" ]; then
         -database "$DB_NAME" \
         -pa "$THREADS"
 
-    # RepeatModeler writes to an RM_* directory.
-    # Copy the classified consensus library to a stable location.
     CONSENSI_FILE=$(find "$RMODELER_DIR" -type f -name "consensi.fa.classified" | head -n 1)
 
     if [ -z "$CONSENSI_FILE" ]; then
@@ -168,9 +185,6 @@ rmOutToGFF3.pl "$RM_OUT" > "$REPEAT_GFF_RAW"
 # -------------------------------
 # 5. Standardise repeat feature labels
 # -------------------------------
-# This makes the repeat features easier to use downstream.
-# The feature type in column 3 is set to "dispersed_repeat",
-# which matches the region label used in the downstream methylation scripts.
 
 echo "Standardising repeat features as dispersed_repeat..."
 
