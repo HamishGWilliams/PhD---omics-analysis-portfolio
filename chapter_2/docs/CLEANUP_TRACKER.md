@@ -3,7 +3,7 @@
 **Project scope:** Make `chapter_2` a clear, reproducible and publication-ready DNA methylation workflow for *Actinia equina* diesel-exposure experiments.  
 **Created:** 2026-05-25  
 **Target branch:** `main`  
-**Current work state:** Desktop-only changes require reconciliation with the current remote `main` branch before further cleanup batches.  
+**Current work state:** Desktop-only changes require reconciliation with the current remote `main` branch before further cleanup batches. The desktop shell type must be accounted for when supplying audit commands.  
 **Update rule:** Every subsequent Chapter 2 cleanup action must update task status, decisions and the progress log.
 
 **Linked documentation**
@@ -63,6 +63,7 @@ Reference genome / annotations + trimmed EM-seq reads
 | A-006 | Import/copy/move helpers are not analytical stages. | Moved five helper scripts from active directories into `scripts/archive/migration_helpers/`; documented in `FILE_RELOCATION_LOG.md`. |
 | A-007 | No active script invokes the moved helper filenames. | No computational path updates were required for relocation batch 001; archived scripts retain original historical data paths as provenance. |
 | A-008 | Local desktop changes may pre-date recent cleanup commits on remote `main`. | Preserve them on a dedicated desktop branch, merge/rebase current `origin/main`, review any path conflicts created by relocation batch 001, then push for review. |
+| A-009 | Desktop command-line environment does not reliably accept pasted multi-line PowerShell commands. | Use one-line commands compatible with Windows Command Prompt while preserving the same large-file and status checks. |
 
 ## Task list
 
@@ -75,7 +76,7 @@ Reference genome / annotations + trimmed EM-seq reads
 | CH2-002 | Regenerate non-empty local file-size report on Maxwell. | High | `[!]` | Current committed size report is empty. |
 | CH2-003 | Write user-facing `chapter_2/README.md` with required inputs, execution order and retained outputs. | High | `[ ]` | Complete after canonical scripts/output policy are fixed. |
 | CH2-004 | Map thesis draft figures/tables to repository output requirements and candidate scripts. | Critical | `[x]` | Recorded in `THESIS_OUTPUT_MAP.md`. |
-| CH2-005 | Reconcile uncommitted desktop-only changes with the current remote repository before additional cleanup edits. | High | `[~]` | Commit local work on a dedicated branch, integrate `origin/main`, inspect relocation-related conflicts and push the branch for review. |
+| CH2-005 | Reconcile uncommitted desktop-only changes with the current remote repository before additional cleanup edits. | High | `[~]` | Desktop branch/fetch workflow in progress; use one-line Command Prompt-compatible audit commands, then review changed files before staging. |
 
 ### Phase 1 — Directory and tracked-file hygiene
 
@@ -173,3 +174,4 @@ Reference genome / annotations + trimmed EM-seq reads
 | 2026-05-25 | Mapped thesis draft figures/tables to repository requirements and candidate producers. Added `THESIS_OUTPUT_MAP.md`. | CH2-004, CH2-032, CH2-034, CH2-044, CH2-055, CH2-064, CH2-065, CH2-075 |
 | 2026-05-25 | Relocation batch 001: moved five import/transfer helper scripts from active locations to `scripts/archive/migration_helpers/`, added archive documentation and `FILE_RELOCATION_LOG.md`; no analytical path edits were required because no active code invokes the moved helper filenames. | CH2-014, CH2-033, CH2-070 |
 | 2026-05-25 | User reported uncommitted local desktop changes not yet represented remotely; desktop reconciliation workflow initiated to preserve, integrate and subsequently review those changes against current `main`. | CH2-005 |
+| 2026-05-25 | User encountered multi-line paste difficulties in Windows Command Prompt during desktop large-file audit; switched instructions to single-line Command Prompt-compatible checks before staging. | CH2-005 |
